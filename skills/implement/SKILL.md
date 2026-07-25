@@ -22,4 +22,4 @@ Done = every acceptance criterion verified by running its command, not by judgem
 
 Once done, run whichever code-review skill is available and address its findings; with none installed, review the diff yourself against the spec before committing.
 
-Commit your work to the current branch.
+Commit to the current branch only when the user or the repo's policy has authorized commits; otherwise stop after verification and report the diff.

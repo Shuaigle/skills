@@ -59,6 +59,8 @@ Iterate until the user approves the breakdown.
 
 Write one file per ticket under `.scratch/<feature-slug>/issues/<NN>-<slug>.md`, numbered from `01` in dependency order (blockers first). Each file's "Blocked by" lists the numbers/titles it depends on. Ensure `.scratch/` is gitignored. One ticket per file, never a single combined file.
 
+If `issues/` already holds files from a previous run, delete them before writing the approved set — tickets are regenerable scratch, and a stale leftover reads as valid frontier work. Completed work lives in the code and its commits, not in old ticket files.
+
 Each ticket must stand alone: the executing agent has not seen this conversation. Inline the conventions to follow, name an exemplar file where one helps, and stamp the commit the ticket was written against.
 
 Work the **frontier**: any ticket whose blockers are all done. For a purely linear chain that means top to bottom.
@@ -87,4 +89,4 @@ Conditions under which the executor stops and reports instead of improvising —
 
 </ticket-template>
 
-Avoid specific file paths or code snippets — they go stale fast. Exception: if a prototype produced a snippet that encodes a decision more precisely than prose can (state machine, reducer, schema, type shape), inline it and note briefly that it came from a prototype. Trim to the decision-rich parts — not a working demo, just the important bits.
+Paths and symbols are allowed — tickets are commit-stamped and short-lived, and the executor's drift check catches staleness. Keep code snippets to decision-rich excerpts (a state machine, a schema, a type shape — e.g. from a prototype), not working demos.

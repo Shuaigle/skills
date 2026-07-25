@@ -26,7 +26,7 @@ git clone https://github.com/Shuaigle/skills.git
 cd skills && ./scripts/link-skills.sh
 ```
 
-呼叫語法：plugin 裝法要帶 namespace（`/shuaigle:grill`）；skills.sh 或 symlink 裝法用裸名（`/grill`）。
+呼叫語法：plugin 裝法要帶 namespace（`/shuaigle:grill`）；skills.sh 或 symlink 裝法用裸名（`/grill`）；Codex 用 `$grill`，或由 description 自動觸發。
 
 依賴說明：`implement` 收尾與 `diagnosing-bugs` 的交棒會用環境裡既有的 code-review／audit skill，沒有就以自我審查、文字報告代替。spec 與 tickets 都是本地檔案，無外部服務依賴。
 

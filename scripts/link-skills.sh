@@ -8,7 +8,7 @@ set -euo pipefail
 #   - 只認 skills/*/SKILL.md（不撈更深層的巢狀檔案）
 #   - 先清掉「指向本 repo 但 skill 已刪除/改名」的 stale symlink
 #   - 指向其他來源的同名 symlink：跳過並警告，不覆蓋
-#   - 同名實體目錄：備份成 <名稱>.bak.<時間戳> 再連結
+#   - 同名實體目錄：跳過並警告，不搬動（要切換請自行備份移除後重跑）
 
 REPO="$(cd "$(dirname "$0")/.." && pwd)"
 DESTS=("$HOME/.claude/skills" "$HOME/.agents/skills")
@@ -76,9 +76,8 @@ for DEST in "${DESTS[@]}"; do
           ;;
       esac
     elif [ -e "$target" ]; then
-      backup="$target.bak.$(date +%Y%m%d%H%M%S)"
-      mv "$target" "$backup"
-      echo "backup  $target -> $backup"
+      echo "skip    $name（$target 是既有實體目錄，不動它；要改用本 repo 版本請自行備份移除後重跑）" >&2
+      continue
     fi
 
     ln -sfn "$src" "$target"

@@ -1,10 +1,10 @@
 ---
 name: to-spec
-description: Turn the current conversation into a spec and publish it to the project issue tracker — no interview, just synthesis of what you've already discussed.
+description: Turn the current conversation into a spec written to a local file (.scratch/<feature-slug>/spec.md) — no requirements interview, just synthesis of what you've already discussed.
 disable-model-invocation: true
 ---
 
-This skill takes the current conversation context and codebase understanding and produces a spec (you may know this document as a PRD). Do NOT interview the user — just synthesize what you already know. Write for a reader with zero context from this conversation: the spec must stand alone.
+This skill takes the current conversation context and codebase understanding and produces a spec (you may know this document as a PRD). Do NOT interview the user about requirements — synthesize what you already know; the seam checkpoint in step 2 is the single permitted question. Write for a reader with zero context from this conversation: the spec must stand alone.
 
 The spec is written to a local file: `.scratch/<feature-slug>/spec.md` (ensure `.scratch/` is gitignored).
 
