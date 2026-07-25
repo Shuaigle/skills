@@ -34,10 +34,10 @@ cd skills && ./scripts/link-skills.sh
 
 | Skill | 觸發 | 用途 |
 |---|---|---|
-| [grill](./skills/grill/SKILL.md) | model | 連環拷問把計畫問到定案；`/grill docs` 同時維護 CONTEXT.md 與 ADR |
+| [grill](./skills/grill/SKILL.md) | model | 連環拷問把計畫問到定案；`grill docs` 同時維護 CONTEXT.md 與 ADR |
 | [to-spec](./skills/to-spec/SKILL.md) | user | 把目前對話收斂成自足的 spec，寫入 `.scratch/<feature>/spec.md` |
 | [to-tickets](./skills/to-tickets/SKILL.md) | user | 拆成 tracer-bullet ticket 檔：自足、可跑的驗證準則、STOP 條件、blocking 關係 |
-| [implement](./skills/implement/SKILL.md) | user | 照 spec/tickets 實作：drift check、/tdd、跑指令驗收、review、commit |
+| [implement](./skills/implement/SKILL.md) | user | 照 spec/tickets 實作：drift check、`tdd`、跑指令驗收、review、commit |
 | [tdd](./skills/tdd/SKILL.md) | model | 紅綠循環；seam 先議定，只測外部行為 |
 | [diagnosing-bugs](./skills/diagnosing-bugs/SKILL.md) | model | 先建 tight feedback loop 再查因的除錯紀律 |
 | [codebase-design](./skills/codebase-design/SKILL.md) | model | Deep module 詞彙與原則：小介面、大實作、清楚的 seam |
@@ -45,7 +45,7 @@ cd skills && ./scripts/link-skills.sh
 
 觸發欄：user = 打名字才會動；model = agent 自行判斷時機，也可手動。
 
-典型流程：`/grill docs` 對齊 → `/to-spec` 出規格 → `/to-tickets` 拆票 → `/implement` 實作（內部走 `/tdd`）→ 卡住用 `diagnosing-bugs`。
+典型流程：`grill docs` 對齊 → `to-spec` 出規格 → `to-tickets` 拆票 → `implement` 實作（內部走 `tdd`）→ 卡住用 `diagnosing-bugs`。
 
 ## 出處與授權
 
