@@ -123,13 +123,14 @@ If a correct seam exists:
 2. Watch it fail.
 3. Apply the fix.
 4. Watch it pass.
-5. Re-run the Phase 1 feedback loop against the original (un-minimised) scenario.
+
+With or without that seam, close the phase by running the Phase 1 loop once against the original, un-minimised scenario and recording the verdict. Phase 6 reads that verdict instead of running the loop a second time.
 
 ## Phase 6 — Cleanup + post-mortem
 
 Required before declaring done:
 
-- [ ] Original repro no longer reproduces (re-run the Phase 1 loop)
+- [ ] The Phase 5 run against the original scenario came back green
 - [ ] Regression test passes (or absence of seam is documented)
 - [ ] All `[DEBUG-...]` instrumentation removed (`grep` the prefix)
 - [ ] Throwaway prototypes deleted (or moved to a clearly-marked debug location)
