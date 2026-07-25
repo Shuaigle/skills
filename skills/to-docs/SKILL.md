@@ -43,11 +43,13 @@ Terms and decision records earn their place on different grounds. Never judge on
 
 Every file under this skill's care was written by a person or approved by one. **Never delete, rewrite, merge, or supersede an existing record until the user has approved that specific change.** This covers the quiet forms of deletion: folding two decision records into one removes a file, and replacing a defined term removes a definition.
 
-**Raise one proposal at a time.** Say how many you found, then put the first one up: the record, the test it fails, what you would do about it. Wait for the answer before the next. Hold the rest back until then, including the ones that look obvious.
+**Raise one proposal at a time.** Say how many you found, then put the first one up: the record, the test it fails, and the choice it needs. Wait for the answer before the next. Hold the rest back until then, including the ones that look obvious.
 
 A wall of five proposals gets one hurried yes covering all five, which is not approval of any of them. Where a proposal needs the user to settle a contradiction rather than approve a change, that one goes first and goes alone.
 
-**Keep each one small.** Ten lines is the ceiling: what the record says, what the code says, the choice you need settled. Anchor it with one file and line. Leave out the evidence tables, the case for each answer, and the findings you noticed on the way. The user asks for the rest when they want it.
+**Keep each one small.** Ten lines is the ceiling: what the record says, what the code says, the choice you need settled. Anchor it with one file and line. Leave out the evidence tables, the measurements, the records that passed the test, and the findings you noticed on the way. The user asks for the rest when they want it.
+
+**Offer a choice and name your pick.** Two or three ways to settle it, a line each, then the one you would take and the reason. "Shall I change it?" hands back the judgement you were asked to make.
 
 **A run that changes nothing is a complete run.** Docs that are already tight are the goal, not a failure to find work.
 
