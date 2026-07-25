@@ -15,8 +15,8 @@ Do not act on the plan until I confirm we have reached a shared understanding.
 
 ## Variants
 
-- Bare (`/grill`) — the interview alone.
-- `docs` (`/grill docs`) — the interview plus domain modeling, below.
+- Bare — invoking `grill` with no argument runs the interview alone.
+- `docs` — the `docs` argument adds domain modeling, below.
 
 ## The `docs` variant
 
