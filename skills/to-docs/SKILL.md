@@ -25,7 +25,7 @@ Either role can be empty, and one file can fill both. Where a repo writes its te
 
 **Never create a second source of truth.** Where a role is filled, run its keep test against those files and write into them in the format they use. A new `CONTEXT.md` beside an existing system splits the record in two. Opening a home for an empty role is a change like any other: propose it and wait.
 
-Start by naming which files you took for each role and what format each uses. Where you landed anywhere but the defaults, or where a role has no home at all, stop there and let the user confirm the reading before you prune. Read the wrong files and every proposal after it is wrong too.
+Start by naming which files you took for each role and what format each uses, one line per role. Where you landed anywhere but the defaults, or where a role has no home at all, stop there and let the user confirm the reading before you prune. Read the wrong files and every proposal after it is wrong too.
 
 ## The keep tests
 
@@ -47,13 +47,17 @@ Every file under this skill's care was written by a person or approved by one. *
 
 A wall of five proposals gets one hurried yes covering all five, which is not approval of any of them. Where a proposal needs the user to settle a contradiction rather than approve a change, that one goes first and goes alone.
 
+**Keep each one small.** Ten lines is the ceiling: what the record says, what the code says, the choice you need settled. Anchor it with one file and line. Leave out the evidence tables, the case for each answer, and the findings you noticed on the way. The user asks for the rest when they want it.
+
 **A run that changes nothing is a complete run.** Docs that are already tight are the goal, not a failure to find work.
 
 ## Process
 
-Two ways in, and they cover different ground. **Distilling a finished piece of work** runs all four steps, with step 1 narrowed to the records that work touched. **A standalone pruning run** sweeps every record in step 1 and stops there.
+**Find the work first.** Look for the newest spec under `.scratch/<feature-slug>/spec.md`, its tickets in the sibling `issues/`, and the commits landed since the last documentation commit. Pick the way in from what turns up, and scope step 1 to it. Several candidates, ask which one. Nothing recent, say there is nothing to distil before you sweep anything.
 
-Deliver the one you were asked for. "Write up what I just built" is not an invitation to audit the repo, and a pile of questions about records the work never touched buries the two lines that answer the actual request. Offer the sweep as a separate run.
+Two ways in, and they cover different ground. **Distilling a finished piece of work** runs all four steps, with step 1 narrowed to the records that work touched. **A standalone pruning run** sweeps every record in step 1 and stops there. Take the first when you found work, the second when the user asked for a sweep.
+
+Deliver the one you were asked for. "Write up what I just built" asks for step 2, and questions about records that work never touched bury the answer to it. Offer the sweep as a separate run.
 
 ### 1. Prune
 
