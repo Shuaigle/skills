@@ -28,7 +28,7 @@ Maintain the project's shared language and decision records as the session runs.
 └── docs/adr/         ← one decision per file
 ```
 
-A root `CONTEXT-MAP.md` means the repo has multiple contexts; it points to each context's own `CONTEXT.md` and `docs/adr/`.
+A root `CONTEXT-MAP.md` means the repo has multiple contexts. The map links each context's `CONTEXT.md`, and that context's `docs/adr/` sits beside it in the same directory.
 
 During the session:
 

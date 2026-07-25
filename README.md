@@ -38,7 +38,7 @@ cd skills && ./scripts/link-skills.sh
 | [to-spec](./skills/to-spec/SKILL.md) | user | 把目前對話收斂成自足的 spec，寫入 `.scratch/<feature>/spec.md` |
 | [to-tickets](./skills/to-tickets/SKILL.md) | user | 拆成 tracer-bullet ticket 檔：自足、可跑的驗證準則、STOP 條件、blocking 關係 |
 | [implement](./skills/implement/SKILL.md) | user | 照 spec/tickets 實作：drift check、`tdd`、跑指令驗收、review、commit |
-| [to-docs](./skills/to-docs/SKILL.md) | user | 實作 commit 後沉澱：夠格的決策進 CONTEXT.md／ADR，脫鉤的記錄提議刪除，文檔獨立 commit |
+| [to-docs](./skills/to-docs/SKILL.md) | user | 實作 commit 後沉澱：穩定詞彙進 CONTEXT.md、夠格的決策進 ADR，脫鉤的記錄提議刪除，文檔獨立 commit |
 | [tdd](./skills/tdd/SKILL.md) | model | 紅綠循環；seam 先議定，只測外部行為 |
 | [diagnosing-bugs](./skills/diagnosing-bugs/SKILL.md) | model | 先建 tight feedback loop 再查因的除錯紀律 |
 | [codebase-design](./skills/codebase-design/SKILL.md) | model | Deep module 詞彙與原則：小介面、大實作、清楚的 seam |
@@ -48,7 +48,7 @@ cd skills && ./scripts/link-skills.sh
 
 典型流程：`grill docs` 對齊 → `to-spec` 出規格 → `to-tickets` 拆票 → `implement` 實作（內部走 `tdd`）→ `to-docs` 沉澱 → 卡住用 `diagnosing-bugs`。
 
-`.scratch/` 的 spec 與 ticket 是施工架，用完即丟；只有 `CONTEXT.md`、`docs/adr/` 與測試會留下。`to-docs` 決定哪些留、哪些刪，也可以單獨叫起來修剪已經跟程式碼脫鉤的舊記錄。
+`.scratch/` 的 spec 與 ticket 是施工架，用完即丟；長期留下的是 `CONTEXT.md`、`docs/adr/` 與測試。測試由 `tdd` 產出、測試套件把關；`to-docs` 只管前兩者，決定哪些留、哪些刪，也可以單獨叫起來修剪已經跟程式碼脫鉤的舊記錄。
 
 ## 出處與授權
 

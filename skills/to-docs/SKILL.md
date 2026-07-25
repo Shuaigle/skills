@@ -14,7 +14,7 @@ Both formats belong to the `grill` skill: [CONTEXT-FORMAT](../grill/references/C
 
 ## Find the documentation first
 
-Read `CONTEXT-MAP.md` at the repo root. When it exists, the repo carries several contexts, each with its own `CONTEXT.md` and `docs/adr/` at the path the map names, and all of them are in scope. When no map exists, the root `CONTEXT.md` and `docs/adr/` are the whole territory.
+Read `CONTEXT-MAP.md` at the repo root. When it exists, the repo carries several contexts and the map links each one's `CONTEXT.md`. The map names no ADR directory: a context keeps its records in `docs/adr/` beside its `CONTEXT.md`, so read that path from the directory holding the mapped file. Every context the map lists is in scope. When no map exists, the root `CONTEXT.md` and `docs/adr/` are the whole territory.
 
 ## The keep tests
 
@@ -46,7 +46,15 @@ List what fails. Wait for the user.
 
 ### 2. Distil
 
-Work from the spec's Implementation Decisions, or from the conversation when no spec exists. Find the decisions that pass the ADR test. **Most runs find none, and that is the expected result.** Say so and move on rather than inventing something to record.
+Work from the spec, or from the conversation when no spec exists. Two kinds of thing can come out of it, and each takes its own test.
+
+**Domain terms.** `grill docs` captures vocabulary the moment it lands, so most terms reach `CONTEXT.md` long before you get here. What you are looking for is the term that surfaced during implementation and never made it back: a concept the code now names that the glossary still misses. Apply the glossary test.
+
+**Decisions.** Read the spec's Implementation Decisions and apply the ADR test.
+
+**Most runs find none of either, and that is the expected result.** Say so and move on rather than inventing something to record.
+
+Decisions never go in `CONTEXT.md`, and terms never become ADRs.
 
 ### 3. Fold before adding
 
