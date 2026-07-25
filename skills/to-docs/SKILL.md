@@ -1,6 +1,6 @@
 ---
 name: to-docs
-description: Distil finished work into the documentation that outlives it, and prune records that no longer point at live code. Writes to CONTEXT.md and docs/adr/.
+description: Distil finished work into the documentation that outlives it, and prune records that no longer point at live code. Writes into the repo's own vocabulary and decision records, CONTEXT.md and docs/adr/ by default.
 disable-model-invocation: true
 ---
 
@@ -8,29 +8,40 @@ disable-model-invocation: true
 
 Decide what from a finished piece of work deserves to outlive it, and shrink what is already there. Run this after the implementation is committed, or on its own when the docs have drifted from the code.
 
-Three things outlive a feature: `CONTEXT.md` (the glossary), `docs/adr/` (one decision per file), and the tests. The tests look after themselves, since `tdd` writes them and the suite fails once they stop matching the code. This skill governs the other two. Specs and tickets under `.scratch/` are scaffolding and stay disposable.
+Three things outlive a feature: the vocabulary record (`CONTEXT.md` by default), the decision records (`docs/adr/` by default, one decision per file), and the tests. The tests look after themselves, since `tdd` writes them and the suite fails once they stop matching the code. This skill governs the other two. Specs and tickets under `.scratch/` are scaffolding and stay disposable.
 
-Both formats belong to the `grill` skill: [CONTEXT-FORMAT](../grill/references/CONTEXT-FORMAT.md) and [ADR-FORMAT](../grill/references/ADR-FORMAT.md).
+The default formats belong to the `grill` skill: [CONTEXT-FORMAT](../grill/references/CONTEXT-FORMAT.md) and [ADR-FORMAT](../grill/references/ADR-FORMAT.md). A repo with its own documentation system keeps its own formats. Match what is there instead of reshaping it.
 
 ## Find the documentation first
 
-Read `CONTEXT-MAP.md` at the repo root. When it exists, the repo carries several contexts and the map links each one's `CONTEXT.md`. The map names no ADR directory: a context keeps its records in `docs/adr/` beside its `CONTEXT.md`, so read that path from the directory holding the mapped file. Every context the map lists is in scope. When no map exists, the root `CONTEXT.md` and `docs/adr/` are the whole territory.
+Two roles matter: whatever defines the project's domain terms, and whatever records its decisions. Repos keep them in different places under different names. Resolve the two separately, each down its own cascade: a repo can declare where its decisions live and say nothing about its terms, and a step that answers for one role answers nothing for the other. Work down until a step answers:
+
+1. **Read `CLAUDE.md` and `AGENTS.md`.** Many repos declare where documentation lives, or which document wins when two disagree. Follow that declaration to the files.
+2. **Read `CONTEXT-MAP.md` at the repo root.** When it exists, the repo carries several contexts and the map links each one's `CONTEXT.md`. That settles the vocabulary role, once per context, and every context the map lists is in scope. The map names no ADR directory, so the decision role carries on down the cascade.
+3. **Look at where the repo keeps its documentation.** Judge a file by what it does. A decision log under another name still holds the decisions.
+4. **Fall back to the defaults**: the root `CONTEXT.md` and `docs/adr/`. Under a context map, a context keeps its records in `docs/adr/` beside its `CONTEXT.md`, so read that path from the directory holding the mapped file.
+
+Either role can be empty, and one file can fill both. Where a repo writes its terms down but records no decisions, you have territory for one test. Say so instead of reading decisions into a document that makes none.
+
+**Never create a second source of truth.** Where a role is filled, run its keep test against those files and write into them in the format they use. A new `CONTEXT.md` beside an existing system splits the record in two. Opening a home for an empty role is a change like any other: propose it and wait.
+
+Start by naming which files you took for each role and what format each uses. Where you landed anywhere but the defaults, or where a role has no home at all, stop there and let the user confirm the reading before you prune. Read the wrong files and every proposal after it is wrong too.
 
 ## The keep tests
 
-Glossary terms and decision records earn their place on different grounds. Never judge one by the other's test.
+Terms and decision records earn their place on different grounds. Never judge one by the other's test.
 
-**A glossary term** in `CONTEXT.md` stays while it names something specific to this project's domain and still shows up in the code and in how the team talks. General programming vocabulary never belonged there to begin with (see CONTEXT-FORMAT). A term nobody uses any more, or one whose concept has left the codebase, is dead weight.
+**A term** stays while it names something specific to this project's domain and still shows up in the code and in how the team talks. General programming vocabulary never belonged there to begin with (see CONTEXT-FORMAT). A term nobody uses any more, or one whose concept has left the codebase, is dead weight.
 
-**A decision record** in `docs/adr/` stays while all three hold:
+**A decision record** stays while all three hold:
 
 1. **It passes the ADR gates.** Hard to reverse, surprising without context, the result of a real trade-off. All three, or it never earned a file.
-2. **It names live code.** You can point at the module or seam it governs. Anchor the record in `CONTEXT.md` vocabulary and the module and seam language of `codebase-design`, not in file paths. A rename breaks a path; it does not break a module's name.
+2. **It names live code.** You can point at the module or seam it governs. Anchor the record in the project's own vocabulary and the module and seam language of `codebase-design`, not in file paths. A rename breaks a path; it does not break a module's name.
 3. **It stops a future reader from filing a false finding.** Someone auditing this area reads the record and sees a deliberate trade-off where they would otherwise see a defect. If no audit would ever open it, it is not earning its place.
 
 ## Approval before any change
 
-Every file under this skill's care was written by a person or approved by one. **Never delete, rewrite, merge, or supersede an existing record until the user has approved that specific change.** This covers the quiet forms of deletion: folding two ADRs into one removes a file, and replacing a glossary term removes a definition.
+Every file under this skill's care was written by a person or approved by one. **Never delete, rewrite, merge, or supersede an existing record until the user has approved that specific change.** This covers the quiet forms of deletion: folding two decision records into one removes a file, and replacing a defined term removes a definition.
 
 Present each proposal as one line, naming the record, the test it fails, and what you would do about it. Then wait.
 
@@ -40,7 +51,7 @@ Present each proposal as one line, naming the record, the test it fails, and wha
 
 ### 1. Prune
 
-Run the matching keep test over every glossary term and every ADR, in every context. Check the anchors by looking: does that module still exist, does that term still appear in the code?
+Run the matching keep test over every term and every decision record, in every context. Check the anchors by looking: does that module still exist, does that term still appear in the code?
 
 List what fails. Wait for the user.
 
@@ -48,19 +59,21 @@ List what fails. Wait for the user.
 
 Work from the spec, or from the conversation when no spec exists. Two kinds of thing can come out of it, and each takes its own test.
 
-**Domain terms.** `grill docs` captures vocabulary the moment it lands, so most terms reach `CONTEXT.md` long before you get here. What you are looking for is the term that surfaced during implementation and never made it back: a concept the code now names that the glossary still misses. Apply the glossary test.
+**Domain terms.** `grill docs` captures vocabulary the moment it lands, so most terms are written down long before you get here. What you are looking for is the term that surfaced during implementation and never made it back: a concept the code now names that the vocabulary record still misses. Apply the term test.
 
-**Decisions.** Read the spec's Implementation Decisions and apply the ADR test.
+**Decisions.** Read the spec's Implementation Decisions and apply the decision-record test.
 
 **Most runs find none of either, and that is the expected result.** Say so and move on rather than inventing something to record.
 
-Decisions never go in `CONTEXT.md`, and terms never become ADRs.
+Decisions never go in the vocabulary record, and terms never become decision records.
 
 ### 3. Fold before adding
 
-For each decision that survives, ask the user whether to fold it into a record that already covers the area or to supersede that record outright. Adding a new file destroys nothing, so it needs no approval past the decision to write it, but reach for it only when nothing existing can absorb the decision. In `CONTEXT.md`, prefer replacing a term over stacking a near-synonym beside it.
+**Terms.** Write each surviving term into the vocabulary record, in the format that record already uses. A term with no counterpart there costs nothing to add. Replacing or merging an existing definition removes one, so propose that and wait. Prefer replacing a term over stacking a near-synonym beside it.
 
-A run that merges two ADRs into one has done more than a run that adds a third.
+**Decisions.** For each decision that survives, ask the user whether to fold it into a record that already covers the area or to supersede that record outright. Adding a new file destroys nothing, so it needs no approval past the decision to write it, but reach for it only when nothing existing can absorb the decision.
+
+A run that merges two decision records into one has done more than a run that adds a third.
 
 ### 4. Commit alone
 
@@ -68,9 +81,9 @@ Documentation gets its own commit, and only where the user or the repo's policy 
 
 When the records came out of an implementation, cite that commit in the message. A standalone pruning run has no such commit and cites nothing.
 
-Keeping documentation out of the implementation commit gives the glossary and the ADRs a history you can read without wading through code diffs, and that is what keeps later pruning cheap.
+Keeping documentation out of the implementation commit gives these records a history you can read without wading through code diffs, and that is what keeps later pruning cheap.
 
 ## STOP if
 
-- `CONTEXT.md` or an ADR contradicts the code and you cannot tell which one is wrong. Report the contradiction and let the user settle it.
+- A record contradicts the code and you cannot tell which one is wrong. Report the contradiction and let the user settle it.
 - You are distilling from work that has no commit yet. Nothing anchors a record to a commit that does not exist. Pruning on its own carries no such requirement.

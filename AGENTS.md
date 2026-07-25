@@ -16,4 +16,4 @@
 
 ## 出處
 
-skills 取自 mattpocock/skills 改造：grilling／grill-me／grill-with-docs／domain-modeling 併成 grill，to-spec 與 to-tickets 落地為本地檔案（`.scratch/<feature-slug>/`），暫不連動 GitHub issues。shadcn/improve 的計畫紀律融入 to-spec／to-tickets／implement：spec 與 ticket 自足（執行者零對話脈絡）、驗收用可跑的指令、STOP 條件、drift check（戳記 commit）。to-docs 是本 repo 原創，上游無對應：`.scratch/` 的 spec 與 ticket 是拋棄式的，長期文檔只留 CONTEXT.md 與 ADR（測試也長期留，但歸 tdd 與測試套件），to-docs 管這兩份文檔的沉澱與修剪，判準取自 improve 的 recon 觀點（ADR 記過的取捨在稽核時算 by-design，不算 finding）。授權見 `LICENSES/`。不追蹤上游；要吸收上游更新時手動 diff（搬入版本：mattpocock/skills@ed37663、shadcn/improve@03369ee）。
+skills 取自 mattpocock/skills 改造：grilling／grill-me／grill-with-docs／domain-modeling 併成 grill，to-spec 與 to-tickets 落地為本地檔案（`.scratch/<feature-slug>/`），暫不連動 GitHub issues。shadcn/improve 的計畫紀律融入 to-spec／to-tickets／implement：spec 與 ticket 自足（執行者零對話脈絡）、驗收用可跑的指令、STOP 條件、drift check（戳記 commit）。to-docs 是本 repo 原創，上游無對應：`.scratch/` 的 spec 與 ticket 是拋棄式的，長期文檔只留詞彙記錄與決策記錄（預設 CONTEXT.md 與 docs/adr/，repo 有既有文檔系統就沿用；測試也長期留，但歸 tdd 與測試套件），to-docs 管這兩份文檔的沉澱與修剪，判準取自 improve 的 recon 觀點（ADR 記過的取捨在稽核時算 by-design，不算 finding）。授權見 `LICENSES/`。不追蹤上游；要吸收上游更新時手動 diff（搬入版本：mattpocock/skills@ed37663、shadcn/improve@03369ee）。
