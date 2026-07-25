@@ -101,7 +101,7 @@ Tool preference:
 2. **Targeted logs** at the boundaries that distinguish hypotheses.
 3. Never "log everything and grep".
 
-Targeted logs edit source. For diagnosis-only requests prefer the debugger and throwaway harnesses; if source instrumentation is unavoidable, say so before adding it — Phase 6 guarantees removal.
+Targeted logs edit source. On a diagnosis-only request, get the user's explicit OK before touching source; until then stay with the debugger, REPL, or a throwaway harness. Phase 6 guarantees removal of whatever was authorized.
 
 **Tag every debug log** with a unique prefix, e.g. `[DEBUG-a4f2]`. Cleanup at the end becomes a single grep. Untagged logs survive; tagged logs die.
 
@@ -135,4 +135,4 @@ Required before declaring done:
 - [ ] Throwaway prototypes deleted (or moved to a clearly-marked debug location)
 - [ ] The hypothesis that turned out correct is stated in the commit / PR message — so the next debugger learns
 
-**Then ask: what would have prevented this bug?** If the answer involves architectural change (no good test seam, tangled callers, hidden coupling), hand the specifics to an architecture-audit skill if one is available (e.g. `/improve`), or record them for a future refactor. Make the recommendation **after** the fix is in, not before — you have more information now than when you started.
+**Then ask: what would have prevented this bug?** If the answer involves architectural change (no good test seam, tangled callers, hidden coupling), hand the specifics to an architecture-audit skill if one is available (such as `improve`), or record them for a future refactor. Make the recommendation **after** the fix is in, not before — you have more information now than when you started.
