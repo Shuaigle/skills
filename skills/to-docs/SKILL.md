@@ -43,17 +43,27 @@ Terms and decision records earn their place on different grounds. Never judge on
 
 Every file under this skill's care was written by a person or approved by one. **Never delete, rewrite, merge, or supersede an existing record until the user has approved that specific change.** This covers the quiet forms of deletion: folding two decision records into one removes a file, and replacing a defined term removes a definition.
 
-Present each proposal as one line, naming the record, the test it fails, and what you would do about it. Then wait.
+**Raise one proposal at a time.** Say how many you found, then put the first one up: the record, the test it fails, what you would do about it. Wait for the answer before the next. Hold the rest back until then, including the ones that look obvious.
+
+A wall of five proposals gets one hurried yes covering all five, which is not approval of any of them. Where a proposal needs the user to settle a contradiction rather than approve a change, that one goes first and goes alone.
 
 **A run that changes nothing is a complete run.** Docs that are already tight are the goal, not a failure to find work.
 
 ## Process
 
+Two ways in, and they cover different ground. **Distilling a finished piece of work** runs all four steps, with step 1 narrowed to the records that work touched. **A standalone pruning run** sweeps every record in step 1 and stops there.
+
+Deliver the one you were asked for. "Write up what I just built" is not an invitation to audit the repo, and a pile of questions about records the work never touched buries the two lines that answer the actual request. Offer the sweep as a separate run.
+
 ### 1. Prune
 
-Run the matching keep test over every term and every decision record, in every context. Check the anchors by looking: does that module still exist, does that term still appear in the code?
+In a standalone run, apply the matching keep test to every term and every decision record, in every context. In a distil run, apply it to the records that work touched: the ones you are about to write into, and the ones governing the same modules.
 
-List what fails. Wait for the user.
+Check the anchors by looking: does that module still exist, does that term still appear in the code?
+
+Count what fails and say the number. Then work through them one at a time.
+
+A contradiction you spot outside that scope is worth a line at the end of the run, naming the file and what looks wrong. It stays a note. Turning it into a proposal drags the user into a decision they did not ask for.
 
 ### 2. Distil
 
@@ -71,7 +81,7 @@ Decisions never go in the vocabulary record, and terms never become decision rec
 
 **Terms.** Write each surviving term into the vocabulary record, in the format that record already uses. A term with no counterpart there costs nothing to add. Replacing or merging an existing definition removes one, so propose that and wait. Prefer replacing a term over stacking a near-synonym beside it.
 
-**Decisions.** For each decision that survives, ask the user whether to fold it into a record that already covers the area or to supersede that record outright. Adding a new file destroys nothing, so it needs no approval past the decision to write it, but reach for it only when nothing existing can absorb the decision.
+**Decisions.** Take the surviving decisions one at a time. For each, ask the user whether to fold it into a record that already covers the area or to supersede that record outright. Adding a new file destroys nothing, so it needs no approval past the decision to write it, but reach for it only when nothing existing can absorb the decision.
 
 A run that merges two decision records into one has done more than a run that adds a third.
 
@@ -85,5 +95,5 @@ Keeping documentation out of the implementation commit gives these records a his
 
 ## STOP if
 
-- A record contradicts the code and you cannot tell which one is wrong. Report the contradiction and let the user settle it.
+- A record in scope contradicts the code and you cannot tell which one is wrong. Report the contradiction and let the user settle it. Outside the scope of this run, the same contradiction is a note at the end and stops nothing.
 - You are distilling from work that has no commit yet. Nothing anchors a record to a commit that does not exist. Pruning on its own carries no such requirement.
