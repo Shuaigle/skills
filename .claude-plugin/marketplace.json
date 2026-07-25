@@ -1,0 +1,19 @@
+{
+  "name": "shuaigle",
+  "owner": {
+    "name": "Shuaigle",
+    "url": "https://github.com/Shuaigle"
+  },
+  "metadata": {
+    "description": "Shuaigle's skills marketplace."
+  },
+  "plugins": [
+    {
+      "name": "shuaigle",
+      "source": "./",
+      "description": "8 個 agent skills：grill、to-spec、to-tickets、implement、tdd、diagnosing-bugs、codebase-design、handoff。",
+      "category": "engineering",
+      "keywords": ["skills", "grill", "tdd", "spec", "tickets", "debugging"]
+    }
+  ]
+}
