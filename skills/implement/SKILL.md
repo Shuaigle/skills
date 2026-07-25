@@ -23,3 +23,5 @@ Done = every acceptance criterion verified by running its command, not by judgem
 Once done, hand the diff to a code-review skill if one is installed. Pick one that reviews a working diff rather than a pull request. Verify and fix its findings; don't re-review the whole diff yourself on top of it. With none installed, reviewing the diff yourself against the spec is the review.
 
 Commit to the current branch only when the user or the repo's policy has authorized commits; otherwise stop after verification and report the diff.
+
+With the implementation committed, the spec's decisions are the only part of this run that has nowhere to live. Point the user at `to-docs` and stop; that skill decides what survives.
