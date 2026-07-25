@@ -20,6 +20,6 @@ Run typechecking regularly, single test files regularly, and the full test suite
 
 Done = every acceptance criterion verified by running its command, not by judgement.
 
-Once done, run whichever code-review skill is available and address its findings; with none installed, review the diff yourself against the spec before committing.
+Once done, hand the diff to a code-review skill if one is installed — one that reviews a working diff, not a pull request. Verify and fix its findings; don't re-review the whole diff yourself on top of it. With none installed, reviewing the diff yourself against the spec is the review.
 
 Commit to the current branch only when the user or the repo's policy has authorized commits; otherwise stop after verification and report the diff.

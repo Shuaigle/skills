@@ -1,6 +1,6 @@
 {
   "name": "shuaigle",
-  "version": "0.1.4",
+  "version": "0.1.5",
   "description": "8 個 agent skills：grill、to-spec、to-tickets、implement、tdd、diagnosing-bugs、codebase-design、handoff。取自 mattpocock/skills 改造，Claude Code 與 Codex 皆可用。",
   "author": {
     "name": "Shuaigle",
