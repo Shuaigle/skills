@@ -1,0 +1,5 @@
+interface:
+  display_name: "To Docs"
+  short_description: "Distil finished work into lasting docs, prune the rest"
+policy:
+  allow_implicit_invocation: false

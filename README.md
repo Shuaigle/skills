@@ -1,6 +1,6 @@
 # Skills
 
-8 個 agent skills。取自 [mattpocock/skills](https://github.com/mattpocock/skills)，融入 [shadcn/improve](https://github.com/shadcn/improve) 的計畫紀律：grill 系列四合一，spec/ticket 落地為本地檔案（`.scratch/`），要求自足、可跑的驗證準則、STOP 條件與 drift check。
+9 個 agent skills。取自 [mattpocock/skills](https://github.com/mattpocock/skills)，融入 [shadcn/improve](https://github.com/shadcn/improve) 的計畫紀律：grill 系列四合一，spec/ticket 落地為本地檔案（`.scratch/`），要求自足、可跑的驗證準則、STOP 條件與 drift check。
 
 每個 skill 附 `SKILL.md`（Agent Skills 標準）與 `agents/openai.yaml`（Codex metadata），Claude Code 與 Codex 裝完即用。
 
@@ -38,6 +38,7 @@ cd skills && ./scripts/link-skills.sh
 | [to-spec](./skills/to-spec/SKILL.md) | user | 把目前對話收斂成自足的 spec，寫入 `.scratch/<feature>/spec.md` |
 | [to-tickets](./skills/to-tickets/SKILL.md) | user | 拆成 tracer-bullet ticket 檔：自足、可跑的驗證準則、STOP 條件、blocking 關係 |
 | [implement](./skills/implement/SKILL.md) | user | 照 spec/tickets 實作：drift check、`tdd`、跑指令驗收、review、commit |
+| [to-docs](./skills/to-docs/SKILL.md) | user | 實作 commit 後沉澱：夠格的決策進 CONTEXT.md／ADR，脫鉤的記錄提議刪除，文檔獨立 commit |
 | [tdd](./skills/tdd/SKILL.md) | model | 紅綠循環；seam 先議定，只測外部行為 |
 | [diagnosing-bugs](./skills/diagnosing-bugs/SKILL.md) | model | 先建 tight feedback loop 再查因的除錯紀律 |
 | [codebase-design](./skills/codebase-design/SKILL.md) | model | Deep module 詞彙與原則：小介面、大實作、清楚的 seam |
@@ -45,7 +46,9 @@ cd skills && ./scripts/link-skills.sh
 
 觸發欄：user = 打名字才會動；model = agent 自行判斷時機，也可手動。
 
-典型流程：`grill docs` 對齊 → `to-spec` 出規格 → `to-tickets` 拆票 → `implement` 實作（內部走 `tdd`）→ 卡住用 `diagnosing-bugs`。
+典型流程：`grill docs` 對齊 → `to-spec` 出規格 → `to-tickets` 拆票 → `implement` 實作（內部走 `tdd`）→ `to-docs` 沉澱 → 卡住用 `diagnosing-bugs`。
+
+`.scratch/` 的 spec 與 ticket 是施工架，用完即丟；只有 `CONTEXT.md`、`docs/adr/` 與測試會留下。`to-docs` 決定哪些留、哪些刪，也可以單獨叫起來修剪已經跟程式碼脫鉤的舊記錄。
 
 ## 出處與授權
 
