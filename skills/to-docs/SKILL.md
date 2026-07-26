@@ -55,9 +55,9 @@ A wall of five proposals gets one hurried yes covering all five, which is not ap
 
 ## Process
 
-**Find the work first.** Look for the newest spec under `.scratch/<feature-slug>/spec.md`, its tickets in the sibling `issues/`, and the commits landed since the last documentation commit. Pick the way in from what turns up, and scope step 1 to it. Several candidates, ask which one. Nothing recent, say there is nothing to distil before you sweep anything.
+**Find the work first.** Look for the newest `.scratch/<feature-slug>/` carrying a marked `spec.md` or marked tickets, and the commits landed since the last documentation commit. `to-tickets` runs straight from a conversation as readily as from a spec, so a directory holding tickets and no spec is work like any other. Pick the way in from what turns up, and scope step 1 to it. Several candidates, ask which one. Nothing recent, say there is nothing to distil before you sweep anything.
 
-Two ways in, and they cover different ground. **Distilling a finished piece of work** runs all four steps, with step 1 narrowed to the records that work touched. **A standalone pruning run** sweeps every record in step 1 and stops there. Take the first when you found work, the second when the user asked for a sweep.
+Two ways in, and they cover different ground. **Distilling a finished piece of work** runs all five steps, with step 1 narrowed to the records that work touched. **A standalone pruning run** sweeps every record in step 1 and stops there. Take the first when you found work, the second when the user asked for a sweep.
 
 Deliver the one you were asked for. "Write up what I just built" asks for step 2, and questions about records that work never touched bury the answer to it. Offer the sweep as a separate run.
 
@@ -73,11 +73,11 @@ A contradiction you spot outside that scope is worth a line at the end of the ru
 
 ### 2. Distil
 
-Work from the spec, or from the conversation when no spec exists. Two kinds of thing can come out of it, and each takes its own test.
+Work from the marked `spec.md` where there is one. Where there is not, work from the marked tickets, which is everything `to-tickets` left behind when it ran straight from a conversation. The conversation itself comes last, and a fresh context has none to offer. Two kinds of thing can come out of whichever you took, and each takes its own test.
 
 **Domain terms.** `grill docs` captures vocabulary the moment it lands, so most terms are written down long before you get here. What you are looking for is the term that surfaced during implementation and never made it back: a concept the code now names that the vocabulary record still misses. Apply the term test.
 
-**Decisions.** Read the spec's Implementation Decisions and apply the decision-record test.
+**Decisions.** Read the spec's Implementation Decisions and apply the decision-record test. Working from tickets instead, the decisions are scattered across what each one says to build and the conditions it stops on, so read the set as a whole rather than looking for a section.
 
 **Most runs find none of either, and that is the expected result.** Say so and move on rather than inventing something to record.
 
@@ -98,6 +98,18 @@ Documentation gets its own commit, and only where the user or the repo's policy 
 When the records came out of an implementation, cite that commit in the message. A standalone pruning run has no such commit and cites nothing.
 
 Keeping documentation out of the implementation commit gives these records a history you can read without wading through code diffs, and that is what keeps later pruning cheap.
+
+### 5. Offer to take the scaffolding down
+
+A distil run only, and only after step 4 committed. Where commits were not authorized and you stopped at the diff, the spec still holds decisions that live nowhere else, so say nothing about deleting it. A standalone pruning run has no feature directory in view and skips the step.
+
+Once the documentation commit lands, the spec and its tickets have done their job, and the next reader who opens them takes a finished plan for the current one. The whole `.scratch/<feature-slug>/` is one disposable unit, so what it holds does not need auditing. What matters is deleting the right directory, and only once the work in it is done.
+
+Check the target is exactly one `.scratch/<feature-slug>/`, the slug a single path segment. Never `.scratch/` itself, never a path climbing out of it.
+
+Then check the work is finished. Every acceptance criterion across the tickets is ticked, or the user says so outright. A criterion still `[ ]` means that check never passed: name the ticket and offer nothing. Tickets written before the tick-on-pass rule read as unfinished here, and the user clears those directories by hand.
+
+Then one offer: the path spelled out, that deleting cannot be undone, and keep or delete with keeping as the default. One confirmation covers one directory. Other directories under `.scratch/` are out of scope however stale they look; sweeping them is a request the user has not made.
 
 ## STOP if
 
