@@ -11,9 +11,9 @@
     {
       "name": "shuaigle",
       "source": "./",
-      "description": "9 個 agent skills：grill、to-spec、to-tickets、implement、to-docs、tdd、diagnosing-bugs、codebase-design、handoff。",
+      "description": "10 個 agent skills：grill、to-spec、to-tickets、implement、to-docs、tdd、diagnosing-bugs、codebase-design、handoff、writing-great-skills。",
       "category": "engineering",
-      "keywords": ["skills", "grill", "tdd", "spec", "tickets", "debugging", "adr"]
+      "keywords": ["skills", "grill", "tdd", "spec", "tickets", "debugging", "adr", "skill-authoring"]
     }
   ]
 }

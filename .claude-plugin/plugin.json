@@ -1,7 +1,7 @@
 {
   "name": "shuaigle",
-  "version": "0.2.6",
-  "description": "9 個 agent skills：grill、to-spec、to-tickets、implement、to-docs、tdd、diagnosing-bugs、codebase-design、handoff。取自 mattpocock/skills 改造，Claude Code 與 Codex 皆可用。",
+  "version": "0.3.0",
+  "description": "10 個 agent skills：grill、to-spec、to-tickets、implement、to-docs、tdd、diagnosing-bugs、codebase-design、handoff、writing-great-skills。取自 mattpocock/skills 改造，Claude Code 與 Codex 皆可用。",
   "author": {
     "name": "Shuaigle",
     "url": "https://github.com/Shuaigle"
@@ -9,7 +9,7 @@
   "homepage": "https://github.com/Shuaigle/skills",
   "repository": "https://github.com/Shuaigle/skills",
   "license": "MIT",
-  "keywords": ["skills", "grill", "tdd", "spec", "tickets", "debugging", "adr"],
+  "keywords": ["skills", "grill", "tdd", "spec", "tickets", "debugging", "adr", "skill-authoring"],
   "skills": [
     "./skills/grill",
     "./skills/to-spec",
@@ -19,6 +19,7 @@
     "./skills/tdd",
     "./skills/diagnosing-bugs",
     "./skills/codebase-design",
-    "./skills/handoff"
+    "./skills/handoff",
+    "./skills/writing-great-skills"
   ]
 }
