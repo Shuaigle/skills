@@ -14,16 +14,7 @@ The default formats belong to the `grill` skill: [CONTEXT-FORMAT](../grill/refer
 
 ## Find the documentation first
 
-Two roles matter: whatever defines the project's domain terms, and whatever records its decisions. Repos keep them in different places under different names. Resolve the two separately, each down its own cascade: a repo can declare where its decisions live and say nothing about its terms, and a step that answers for one role answers nothing for the other. Work down until a step answers:
-
-1. **Read `CLAUDE.md` and `AGENTS.md`.** Many repos declare where documentation lives, or which document wins when two disagree. Follow that declaration to the files.
-2. **Read `CONTEXT-MAP.md` at the repo root.** When it exists, the repo carries several contexts and the map links each one's `CONTEXT.md`. That settles the vocabulary role, once per context, and every context the map lists is in scope. The map names no ADR directory, so the decision role carries on down the cascade.
-3. **Look at where the repo keeps its documentation.** Judge a file by what it does. A decision log under another name still holds the decisions.
-4. **Fall back to the defaults**: the root `CONTEXT.md` and `docs/adr/`. Under a context map, a context keeps its records in `docs/adr/` beside its `CONTEXT.md`, so read that path from the directory holding the mapped file.
-
-Either role can be empty, and one file can fill both. Where a repo writes its terms down but records no decisions, you have territory for one test. Say so instead of reading decisions into a document that makes none.
-
-**Never create a second source of truth.** Where a role is filled, run its keep test against those files and write into them in the format they use. A new `CONTEXT.md` beside an existing system splits the record in two. Opening a home for an empty role is a change like any other: propose it and wait.
+Resolve the vocabulary and decision roles with [DOCUMENTATION-LOCATIONS.md](../grill/references/DOCUMENTATION-LOCATIONS.md). Where a role is filled, run its keep test against those files. Opening a home for an empty role is a change like any other: propose it and wait.
 
 Start by naming which files you took for each role and what format each uses, one line per role. Where you landed anywhere but the defaults, or where a role has no home at all, stop there and let the user confirm the reading before you prune. Read the wrong files and every proposal after it is wrong too.
 

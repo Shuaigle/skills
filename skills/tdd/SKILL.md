@@ -1,13 +1,13 @@
 ---
 name: tdd
-description: Test-driven development. Use when the user wants to build features or fix bugs test-first, mentions "red-green-refactor", or wants integration tests.
+description: Red-green test-driven development. Use for test-first feature or bug work, or integration tests.
 ---
 
 # Test-Driven Development
 
 TDD is the red → green loop. This skill is the reference that makes that loop produce tests worth keeping: what a good test is, where tests go, the anti-patterns, and the rules of the loop. Every section applies on every cycle — consult them before and during the loop, not after.
 
-When exploring the codebase, read `CONTEXT.md` (if it exists) so test names and interface vocabulary match the project's domain language, and respect ADRs in the area you're touching.
+When exploring the codebase, use vocabulary from the relevant vocabulary record in test names and interfaces, and respect ADRs in the area you're touching.
 
 ## What a good test is
 
@@ -17,7 +17,7 @@ See [tests.md](tests.md) for examples and [mocking.md](mocking.md) for mocking g
 
 ## Seams — where tests go
 
-A **seam** is the place where a module's interface lives: you observe behavior there without reaching inside. Tests live at seams, never against internals.
+Use the `codebase-design` skill's **seam** definition. Tests exercise behavior through agreed seams.
 
 **Test only at pre-agreed seams.** Before writing any test, write down the seams under test and confirm them with the user. No test is written at an unconfirmed seam. You can't test everything, and agreeing the seams up front puts testing effort on the critical paths and complex logic instead of every edge case.
 

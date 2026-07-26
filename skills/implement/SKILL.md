@@ -6,6 +6,8 @@ disable-model-invocation: true
 
 Implement the work described by the user in the spec or tickets.
 
+When several tickets exist, work the **frontier**: choose one whose blockers have every acceptance box ticked. In a linear chain, work top to bottom.
+
 ## Rules
 
 1. Drift-check first: compare the spec/ticket's recorded commit against `HEAD`. If the code it cites has changed underneath it, stop and report — do not improvise around a stale plan.

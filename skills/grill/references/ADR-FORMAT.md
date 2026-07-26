@@ -1,8 +1,8 @@
 # ADR Format
 
-By default ADRs live in `docs/adr/` and use sequential numbering: `0001-slug.md`, `0002-slug.md`, etc. A repo that already keeps decision records sets its own location and naming; follow those.
+Use [DOCUMENTATION-LOCATIONS.md](DOCUMENTATION-LOCATIONS.md) to locate the decision records. Follow the repo's naming when it has one; otherwise use sequential numbering: `0001-slug.md`, `0002-slug.md`, etc.
 
-Create the `docs/adr/` directory lazily, when the first ADR is needed and the repo keeps no decision records of its own. Where it has somewhere for them, write there in the format already in use.
+Create the chosen directory lazily, when the first ADR is needed.
 
 ## Template
 

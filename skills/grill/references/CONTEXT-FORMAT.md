@@ -51,10 +51,6 @@ _Avoid_: Client, buyer, account
 - **Ordering ↔ Billing**: Shared types for `CustomerId` and `Money`
 ```
 
-The skill infers which structure applies:
-
-- If `CONTEXT-MAP.md` exists, read it to find contexts
-- If only a root `CONTEXT.md` exists, single context
-- If neither exists, check whether the repo records its domain terms elsewhere. `CLAUDE.md` or `AGENTS.md` may say where documentation lives; write into that file. Create a root `CONTEXT.md` lazily on the first resolved term only when nothing else holds the terms. Two files defining the same word is worse than one file in an odd place.
+Use [DOCUMENTATION-LOCATIONS.md](DOCUMENTATION-LOCATIONS.md) to choose the vocabulary record.
 
 When multiple contexts exist, infer which one the current topic relates to. If unclear, ask.
