@@ -1,27 +1,29 @@
 ---
 name: to-tickets
-description: Break a plan, spec, or the current conversation into a set of tracer-bullet tickets, each declaring its blocking edges, written as local ticket files.
-argument-hint: "Spec path, issue reference, or feature context"
+description: Compile a local spec into tracer-bullet tickets with explicit blocking edges.
+argument-hint: "Spec path or feature slug"
 disable-model-invocation: true
 ---
 
 # To Tickets
 
-Break a plan, spec, or conversation into a set of **tickets** — tracer-bullet vertical slices, each declaring the tickets that **block** it.
+Compile one spec into **tickets**: tracer-bullet vertical slices, each declaring the tickets that **block** it.
 
-Tickets are written as local files under `.scratch/<feature-slug>/`, beside the spec they came from.
+The spec owns the problem, scope, and decisions. Tickets own execution order and verification. Tickets are written beside their source at `.scratch/<feature-slug>/`.
 
 ## Process
 
-### 1. Gather context
+### 1. Read the source
 
-Work from whatever is already in the conversation context. If the user passes a reference (a spec path, an issue number or URL) as an argument, fetch it and read its full body and comments.
+Read exactly one `.scratch/<feature-slug>/spec.md`, located from the argument or the current conversation. Missing or ambiguous, stop and name what is needed.
 
-### 2. Explore the codebase (optional)
+This skill is a compiler: spec bytes stay fixed; only marked ticket files are mutable. Record the spec's content hash now; the same hash after ticket generation is part of this run's completion criterion.
 
-If you have not already explored the codebase, do so to understand the current state of the code. Ticket titles and descriptions should use vocabulary from the relevant vocabulary record, and respect ADRs in the area you're touching.
+### 2. Ground the breakdown
 
-Look for opportunities to prefactor the code to make the implementation easier. "Make the change easy, then make the easy change."
+Explore only far enough to find seams, exemplars, runnable verification commands, and drift from the spec's recorded commit. Use vocabulary from the relevant vocabulary record and respect the area's ADRs.
+
+Code or documentation that contradicts the spec ends the run: report the conflict and the spec revision it requires. Tickets may add paths, exemplars, commands, and ordering; a missing product, scope, implementation, or testing decision ends the run for spec revision.
 
 ### 3. Draft vertical slices
 
@@ -54,7 +56,7 @@ Ask the user:
 - Are the blocking edges correct — does each ticket only depend on tickets that genuinely gate it?
 - Should any tickets be merged or split further?
 
-Iterate until the user approves the breakdown.
+Iterate until the user approves the breakdown. This checkpoint edits the breakdown only; a requested change to the spec ends the run for spec revision.
 
 ### 5. Write the tickets as local files
 
@@ -64,7 +66,7 @@ Where the feature directory already holds tickets from a previous run, reconcile
 
 Each ticket must stand alone: the executing agent has not seen this conversation. Inline the conventions to follow, name an exemplar file where one helps, and stamp the commit the ticket was written against.
 
-Leave the parent spec untouched.
+After writing, require the spec's content hash to match step 1. A mismatch fails the run.
 
 <ticket-template>
 
