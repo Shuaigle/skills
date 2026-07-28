@@ -9,6 +9,8 @@ disable-model-invocation: true
 
 Compile one spec into **tickets**: tracer-bullet vertical slices, each declaring the tickets that **block** it.
 
+When speaking to the user, explain a tracer bullet as a narrow, working vertical slice through every affected layer, and a blocking edge as work that must finish first.
+
 The spec owns the problem, scope, and decisions. Tickets own execution order and verification. Tickets are written beside their source at `.scratch/<feature-slug>/`.
 
 ## Process

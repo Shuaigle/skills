@@ -14,6 +14,8 @@ When several tickets exist, work the **frontier**: choose one whose blockers hav
 2. Touch only what the spec/ticket puts in scope. No drive-by fixes; note them for a future ticket.
 3. A ticket's STOP condition fires → stop and report.
 
+In the stop report, explain the exact condition in plain language.
+
 ## Loop
 
 Use the bundled `tdd` skill where possible, at pre-agreed seams.

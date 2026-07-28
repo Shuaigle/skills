@@ -9,6 +9,8 @@ A discipline for hard bugs. Skip phases only when explicitly justified.
 
 When exploring the codebase, read the relevant vocabulary record to model the modules, and check ADRs in the area you're touching.
 
+In user-facing updates, use plain headings: Reproduction, Suspected causes, Confirmed cause, and Verification. Explain technical terms with the command, file, or observed result they refer to.
+
 ## Phase 1 — Build a feedback loop
 
 **This is the skill.** Everything else is mechanical. If you have a **tight** pass/fail signal for the bug — one that goes red on _this_ bug — you will find the cause; bisection, hypothesis-testing, and instrumentation all just consume it. If you don't have one, no amount of staring at code will save you.

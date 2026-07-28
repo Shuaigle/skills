@@ -10,6 +10,8 @@ Decide what from a finished piece of work deserves to outlive it, and shrink wha
 
 Three things outlive a feature: the vocabulary record (`CONTEXT.md` by default), the decision records (`docs/adr/` by default, one decision per file), and the tests. The tests look after themselves, since `tdd` writes them and the suite fails once they stop matching the code. This skill governs the other two. Specs and tickets under `.scratch/` are scaffolding and stay disposable.
 
+In user messages, translate the internal labels into plain language: vocabulary record means the project terms file; decision record means a design-decision document; prune means remove outdated documentation; distil means save useful terms and decisions; fold means add a decision to an existing record; supersede means write its replacement; scaffolding means temporary spec and ticket files.
+
 The default formats belong to the `grill` skill: [CONTEXT-FORMAT](../grill/references/CONTEXT-FORMAT.md) and [ADR-FORMAT](../grill/references/ADR-FORMAT.md). A repo with its own documentation system keeps its own formats. Match what is there instead of reshaping it.
 
 ## Find the documentation first

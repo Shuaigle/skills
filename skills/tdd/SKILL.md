@@ -23,7 +23,7 @@ Use the `codebase-design` skill's **seam** definition. Tests exercise behavior t
 
 A spec or ticket that already records agreed seams counts as that confirmation. Read it, use those seams, and leave the user alone.
 
-When nothing has settled them, ask: "What's the public interface, and which seams should we test?"
+When nothing has settled them, ask: "What's the public interface, and which seams should we test?" If the user may not know those terms, add: "In other words, what should callers use, and which entry points should tests exercise?"
 
 ## Anti-patterns
 

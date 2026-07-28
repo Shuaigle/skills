@@ -14,6 +14,8 @@ Before spawning sub-agents, write a user-facing explanation of the problem space
 - The dependencies it would rely on, and which category they fall into (see [DEEPENING.md](DEEPENING.md))
 - A rough illustrative code sketch to ground the constraints — not a proposal, just a way to make the constraints concrete
 
+Use plain labels in that explanation: current problem, constraints, dependencies, and example.
+
 Show this to the user, then immediately proceed to Step 2. The user reads and thinks while the sub-agents work in parallel.
 
 ### 2. Spawn sub-agents
@@ -40,5 +42,7 @@ Each sub-agent outputs:
 ### 3. Present and compare
 
 Present designs sequentially so the user can absorb each one, then compare them in prose. Contrast by **depth** (leverage at the interface), **locality** (where change concentrates), and **seam placement**.
+
+For the user, explain these as the public surface, hidden behaviour, change location, and where the module interface lives.
 
 After comparing, give your own recommendation: which design you think is strongest and why. If elements from different designs would combine well, propose a hybrid. Be opinionated — the user wants a strong read, not a menu.

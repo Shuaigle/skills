@@ -14,7 +14,7 @@ The spec is written to a local file: `.scratch/<feature-slug>/spec.md` (ensure `
 
 2. Sketch out the seams at which you're going to test the feature. Existing seams should be preferred to new ones. Use the highest seam possible. If new seams are needed, propose them at the highest point you can. The fewer seams across the codebase, the better - the ideal number is one.
 
-State the chosen seams to the user for a yes/no — a single checkpoint, not an interview. No answer? Record them as assumptions in the spec and proceed.
+State the chosen seams to the user for a yes/no — a single checkpoint, not an interview. If the user may not know the term, add: "In other words, these are the entry points the tests will use." No answer? Record them as assumptions in the spec and proceed.
 
 3. Write the spec using the template below to `.scratch/<feature-slug>/spec.md`. When the work spans repos, name the originating app at the top. Record the commit the spec was written against (`git rev-parse --short HEAD`) under Further Notes.
 
