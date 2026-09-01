@@ -54,6 +54,8 @@ Where the ladder decides _how far down_ a piece sits, **co-location** decides _w
 
 Keep each meaning in a **single source of truth**: one authoritative place, so changing the behaviour is a one-place edit.
 
+The environment is a source of truth too. A document that repeats `package.json` scripts, config, directory layout, or `--help` output is a **cache** and earns its load only when the lookup is expensive. Record what the agent cannot find by looking: unwritten conventions, reasons, and gotchas. Leave one-file and one-command lookups to the environment, where they cannot go stale.
+
 Check every line for **relevance**: does it still bear on what the skill does?
 
 Then hunt **no-ops** sentence by sentence, not just line by line: run the no-op test on each sentence in isolation, and when one fails, delete the whole sentence rather than trim words from it. Be aggressive — most prose that fails should go, not be rewritten.

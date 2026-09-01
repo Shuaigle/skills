@@ -174,6 +174,12 @@ The desired state where each meaning lives in exactly one authoritative place, s
 
 _Avoid_: home, canonical location
 
+### Cache
+
+A document's copy of a fact whose **single source of truth** is the environment: scripts, config, directory layout, or tool output. It earns its load only when direct lookup is expensive. Cheap facts stay in the environment; documents keep unwritten conventions, reasons, and gotchas that inspection cannot recover.
+
+_Avoid_: restatement, snapshot
+
 ### Duplication
 
 _Failure mode._ The same meaning given more than one **single source of truth**. It costs maintenance (change one place, you must change the others), costs tokens, and inflates prominence — repeating a meaning weights it on the ladder past its real rank. The accidental inverse of a **leading word**, which raises attention on purpose by repeating a token, never the meaning.

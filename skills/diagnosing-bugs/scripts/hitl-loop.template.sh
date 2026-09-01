@@ -11,6 +11,8 @@
 #   capture VAR "<question>"      → show question, read response into VAR
 #
 # At the end, captured values are printed as KEY=VALUE for the agent to parse.
+# Capture observations, never credentials. Leave signing in to a `step` because
+# every captured value is printed back to the terminal where the agent reads it.
 
 set -euo pipefail
 
@@ -22,6 +24,7 @@ step() {
 capture() {
   local var="$1" question="$2" answer
   printf '\n>>> %s\n' "$question"
+  printf '    Never enter credentials. Replace secrets with <REDACTED>.\n'
   read -r -p "    > " answer
   printf -v "$var" '%s' "$answer"
 }
@@ -32,7 +35,7 @@ step "Open the app at http://localhost:3000 and sign in."
 
 capture ERRORED "Click the 'Export' button. Did it throw an error? (y/n)"
 
-capture ERROR_MSG "Paste the error message (or 'none'):"
+capture ERROR_MSG "Paste the redacted error message (or 'none'):"
 
 # --- edit above ---------------------------------------------------------
 
