@@ -28,7 +28,18 @@ Ticking a box writes to the file, so tick only tickets whose first line is exact
 
 The next run reads those boxes to tell which blockers have landed, and `to-docs` reads them to tell whether the work is finished. A box you tick without running its command misleads both.
 
-Once done, hand the diff to a code-review skill if one is installed. Pick one that reviews a working diff rather than a pull request. Verify and fix its findings; don't re-review the whole diff yourself on top of it. With none installed, reviewing the diff yourself against the spec is the review.
+## Review
+
+Once done, use an installed code-review skill that reviews working changes. Pass it the changes in scope, including new files, the local spec/tickets, relevant documented repo standards, and the results of checks already run.
+
+Ask for separate results:
+
+- **Spec:** missing or partial requirements, incorrect behavior, and behavior outside the agreed scope. Cite the requirement behind each finding.
+- **Standards:** breaches of documented repo rules, citing the rule. Label heuristic concerns as judgement calls; repo rules take precedence. Skip mechanical findings already settled by the recorded checks.
+
+Use one reviewer for both axes unless the change's complexity warrants separate parallel reviewers. With no suitable skill installed, review both axes yourself. Verify and fix the findings within the agreed scope; don't re-review the whole diff on top of an installed reviewer.
+
+## Finish
 
 Commit to the current branch only when the user or the repo's policy has authorized commits; otherwise stop after verification and report the diff.
 

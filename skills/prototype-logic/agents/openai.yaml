@@ -1,0 +1,3 @@
+interface:
+  display_name: "Prototype Logic"
+  short_description: "Interactive prototypes for state and logic decisions"

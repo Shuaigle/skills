@@ -1,0 +1,5 @@
+interface:
+  display_name: "Retro"
+  short_description: "Find session friction and propose better agent tooling"
+policy:
+  allow_implicit_invocation: false

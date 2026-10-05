@@ -6,15 +6,27 @@ argument-hint: "[docs] <plan or decision>"
 
 # Grill
 
-Interview me relentlessly about every aspect of the plan until we reach a shared understanding. Walk down each branch of the decision tree, resolving dependencies between decisions one-by-one. For each question, provide your recommended answer.
+Interview me relentlessly about every aspect of the plan until we reach a shared understanding. Keep the decision tree in conversation context: settled decisions, open decisions, and their prerequisites. Bare grill requires no new artifact.
+
+The **frontier** contains the open decisions whose prerequisites are settled. Ask one frontier question at a time, provide your recommended answer, and wait for my answer before continuing. Questions that depend on an unsettled decision wait; do not guess that answer.
 
 Phrase each question in everyday language: state the concrete choice, its effect, and your recommendation. Define a technical term in one sentence when the decision depends on it.
 
-Ask the questions one at a time, waiting for feedback on each question before continuing. Asking multiple questions at once is bewildering.
+After each answer, update the tree and frontier. If an earlier answer changes, reopen the downstream decisions it invalidates and confirm them again.
 
-If a *fact* can be found by exploring the environment (filesystem, tools, etc.), look it up rather than asking me. The *decisions*, though, are mine — put each one to me and wait for my answer.
+If a *fact* can be found by exploring the environment (filesystem, tools, etc.), look it up rather than asking me. Pending factual exploration is an unsettled prerequisite; ask another ready question while it runs. An empty frontier with blocked branches is a waiting state, not completion. The *decisions*, though, are mine — put each one to me and wait for my answer.
 
-Do not act on the plan until I confirm we have reached a shared understanding.
+When a decision needs runnable evidence, suggest `prototype-logic` and bring its findings back into the decision tree.
+
+Finish when every known branch is settled and no assumptions remain silently accepted. Summarize the decisions and ask me to confirm our shared understanding. Do not act on the plan until I confirm.
+
+## Question UI
+
+Use an available, permitted question tool for each question. When the decision has clear alternatives, offer 2–3 distinct options, put your recommendation first, and explain each option's effect briefly. Keep free-text input available; do not invent options for an open-ended question.
+
+- **Codex:** Use `request_user_input` when the current mode permits it; it may be limited to Plan mode. Otherwise use `request_user_input_async` when available. After an async question, wait for the user's actual answer before asking the next question or acting on that decision. A preselected option, a timeout, or an empty response is not an answer.
+- **Claude Code:** Use `AskUserQuestion` when available.
+- **Fallback:** Ask in chat only when no question tool supports the question in the current environment and mode. Listing options in chat does not create a choice UI.
 
 ## Variants
 
