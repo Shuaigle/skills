@@ -11,7 +11,7 @@
     {
       "name": "shuaigle",
       "source": "./",
-      "description": "12 個 agent skills：grill、prototype-logic、to-spec、to-tickets、implement、to-docs、retro、tdd、diagnosing-bugs、codebase-design、handoff、writing-great-skills。逐題追蹤決策、邏輯原型、雙軸審查與 session 環境回顧。",
+      "description": "13 個 agent skills：grill、prototype-logic、to-spec、to-tickets、implement、review、to-docs、retro、tdd、diagnosing-bugs、codebase-design、handoff、writing-great-skills。逐題追蹤決策、邏輯原型、三軸 code review 與 session 環境回顧。",
       "category": "engineering",
       "keywords": ["skills", "grill", "interactive-questions", "logic-prototype", "code-review", "retrospective", "tdd", "spec", "tickets", "debugging", "adr", "skill-authoring"]
     }

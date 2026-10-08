@@ -1,7 +1,7 @@
 {
   "name": "shuaigle",
-  "version": "0.4.0",
-  "description": "12 個 agent skills：grill、prototype-logic、to-spec、to-tickets、implement、to-docs、retro、tdd、diagnosing-bugs、codebase-design、handoff、writing-great-skills。逐題追蹤決策、邏輯原型、雙軸審查與 session 環境回顧。取自 mattpocock/skills 改造，Claude Code 與 Codex 皆可用。",
+  "version": "0.5.0",
+  "description": "13 個 agent skills：grill、prototype-logic、to-spec、to-tickets、implement、review、to-docs、retro、tdd、diagnosing-bugs、codebase-design、handoff、writing-great-skills。逐題追蹤決策、邏輯原型、三軸 code review 與 session 環境回顧。取自 mattpocock/skills 改造，Claude Code 與 Codex 皆可用。",
   "author": {
     "name": "Shuaigle",
     "url": "https://github.com/Shuaigle"
@@ -16,6 +16,7 @@
     "./skills/to-spec",
     "./skills/to-tickets",
     "./skills/implement",
+    "./skills/review",
     "./skills/to-docs",
     "./skills/retro",
     "./skills/tdd",

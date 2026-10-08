@@ -30,14 +30,9 @@ The next run reads those boxes to tell which blockers have landed, and `to-docs`
 
 ## Review
 
-Once done, use an installed code-review skill that reviews working changes. Pass it the changes in scope, including new files, the local spec/tickets, relevant documented repo standards, and the results of checks already run.
+Once done, use the bundled `review` skill on the working changes. Pass it the spec/tickets in scope and the results of checks already run.
 
-Ask for separate results:
-
-- **Spec:** missing or partial requirements, incorrect behavior, and behavior outside the agreed scope. Cite the requirement behind each finding.
-- **Standards:** breaches of documented repo rules, citing the rule. Label heuristic concerns as judgement calls; repo rules take precedence. Skip mechanical findings already settled by the recorded checks.
-
-Use one reviewer for both axes unless the change's complexity warrants separate parallel reviewers. With no suitable skill installed, review both axes yourself. Verify and fix the findings within the agreed scope; don't re-review the whole diff on top of an installed reviewer.
+Fix its confirmed findings under Rule 2, and report judgement calls and set-aside items to the user.
 
 ## Finish
 
