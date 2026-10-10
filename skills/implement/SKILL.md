@@ -28,14 +28,11 @@ Ticking a box writes to the file, so tick only tickets whose first line is exact
 
 The next run reads those boxes to tell which blockers have landed, and `to-docs` reads them to tell whether the work is finished. A box you tick without running its command misleads both.
 
-## Review
-
-Once done, use the bundled `review` skill on the working changes. Pass it the spec/tickets in scope and the results of checks already run.
-
-Fix its confirmed findings under Rule 2, and report judgement calls and set-aside items to the user.
-
 ## Finish
 
 Commit to the current branch only when the user or the repo's policy has authorized commits; otherwise stop after verification and report the diff.
 
-With the implementation committed, the spec's decisions are the only part of this run that has nowhere to live. Point the user at `to-docs` and stop; that skill decides what survives.
+Then stop and point the user at the next two steps:
+
+1. `review`, run from a session that did not write this code, preferably on another model.
+2. `to-docs`, once the review's fixes land. The spec's decisions are the only part of this run that has nowhere to live; that skill decides what survives.
