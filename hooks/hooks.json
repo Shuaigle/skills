@@ -1,0 +1,4 @@
+{
+  "description": "Jev session-scoped native Claude Code model routing",
+  "modules": ["../skills/jev/claude/register.js"]
+}

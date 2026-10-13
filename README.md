@@ -1,6 +1,6 @@
 # Skills
 
-13 個 agent skills。取自 [mattpocock/skills](https://github.com/mattpocock/skills)，融入 [shadcn/improve](https://github.com/shadcn/improve) 的計畫紀律：grill 系列四合一，spec/ticket 落地為本地檔案（`.scratch/`），要求自足、可跑的驗證準則、STOP 條件與 drift check（先確認計畫仍符合程式碼）。
+14 個 agent skills。取自 [mattpocock/skills](https://github.com/mattpocock/skills)，融入 [shadcn/improve](https://github.com/shadcn/improve) 的計畫紀律：grill 系列四合一，spec/ticket 落地為本地檔案（`.scratch/`），要求自足、可跑的驗證準則、STOP 條件與 drift check（先確認計畫仍符合程式碼）。
 
 每個 skill 附 `SKILL.md`（Agent Skills 標準）與 `agents/openai.yaml`（Codex metadata），Claude Code 與 Codex 裝完即用。
 
@@ -28,7 +28,7 @@ cd skills && ./scripts/link-skills.sh
 
 呼叫語法：plugin 裝法要帶 namespace（`/shuaigle:grill`）；skills.sh 或 symlink 裝法用裸名（`/grill`）；Codex 用 `$grill`，或由 description 自動觸發。
 
-依賴說明：`diagnosing-bugs` 的架構交棒會用環境裡既有的 audit skill（如 `improve`），沒有就以文字報告代替。`review` 預設開 fresh-context subagent 審，harness 不支援時自己審，並在報告開頭的來源行註明。spec 與 tickets 都是本地檔案，無外部服務依賴。
+依賴說明：`diagnosing-bugs` 的架構交棒會用環境裡既有的 audit skill（如 `improve`），沒有就以文字報告代替。`review` 預設開 fresh-context subagent 審，harness 不支援時自己審，並在報告開頭的來源行註明。spec 與 tickets 都是本地檔案。`jev` 需要 Python 3、網路與環境變數 `JEV_API_KEY`，呼叫 TypeSafe API。Claude Code 原生自動模型路由需要 `2.1.287+`，並以 plugin 方式載入本 repo 的 mod；symlink／skills.sh 只安裝 skill，不會載入 mod。開發時可用 `claude --plugin-dir .`。
 
 ## Skills
 
@@ -47,8 +47,15 @@ cd skills && ./scripts/link-skills.sh
 | [codebase-design](./skills/codebase-design/SKILL.md) | model | Deep module 詞彙與原則：小介面隱藏大量行為，並選定清楚的 seam |
 | [handoff](./skills/handoff/SKILL.md) | user | 把對話壓縮成交接文檔給下一個 agent |
 | [writing-great-skills](./skills/writing-great-skills/SKILL.md) | user | 寫與改 skill 的參考：invocation 取捨、資訊層級、環境真相、剪枝、leading words、失效模式 |
+| [jev](./skills/jev/SKILL.md) | model | 對話內獨立開關任務模型、skill 與 subagent 模型決策；Claude 原生 mod 自動路由當前請求，Codex Desktop 可自動設定下一回合模型 |
 
 觸發欄：user = 打名字才會動；model = agent 自行判斷時機，也可手動。
+
+`jev` 有三個獨立選項：`task` 決定主對話模型、`skill` 選一個可自動呼叫的 skill（也可不選）、`subagent` 在每次預定派工前決定該子任務的模型。`jev on` 維持只開啟 `task`；`jev on skill subagent` 累加這兩項，`jev off task` 只關閉主模型決策，`jev on all` 全開，`jev off` 全關，`jev status` 列出三項狀態。新對話預設全關。Claude Code plugin 用 `/shuaigle:jev on skill subagent`，裸 skill 用 `/jev on skill subagent`，Codex 用 `$jev on skill subagent`。
+
+同一任務的決策合併送出；subagent 使用自己的子任務摘要與 spawn 工具支援的模型清單。只傳摘要與去除私人資訊的候選描述。使用者明確指定的模型、skill，以及手動限定 skill 的政策優先；開啟 subagent 決策不會額外建立 agent。Codex Desktop 的 Jev 切換會設定原對話的下一回合模型，不能改已執行中的回合；須用 turn metadata 確認實際套用。需要在目前回合開始前換模型時，宿主需提供可控制該回合的 app-server 整合。其他沒有同對話切換介面的宿主，回報推薦並依原對話手動切換流程處理。
+
+Claude 原生 mod 載入後，用 `/jev on task` 或 `/jev on subagent` 啟用自動模型路由；`/jev on all` 全開。它在實際請求送出前套用 Jev 的選擇，不必逐次手動確認，也不會另開對話。`/jev status` 區分推薦模型與宿主回報的實際模型；`/model` 的預設選項可以保持原值。原生路徑只把本地萃取的任務類型、複雜度等特徵交給 Jev，不傳完整 prompt。`skill` 仍由 agent 依現有流程選擇；runtime 旗標只存在記憶體，mod 重載或 session 結束即重設。
 
 典型流程：`grill docs` 對齊 → `to-spec` 出規格 → `to-tickets` 拆票 → `implement` 實作（內部走 `tdd`）→ 換 session（最好換模型）跑 `review` → `to-docs` 沉澱 → 卡住用 `diagnosing-bugs`。
 

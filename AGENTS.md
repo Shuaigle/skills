@@ -6,7 +6,7 @@
 
 1. README 的 skills 表、`.claude-plugin/plugin.json` 的 `skills` 陣列，以及 `.claude-plugin/marketplace.json` 的 description 與 keywords，三處同步更新。validate 不檢查 description 內容，漏了不會報錯。
 2. 每個 skill 都要有 `agents/openai.yaml`。user-invoked 的 skill：`SKILL.md` 設 `disable-model-invocation: true`，`openai.yaml` 設 `policy.allow_implicit_invocation: false`，兩者同進退。
-3. bump `plugin.json` 的 `version`，跑 `claude plugin validate . --strict`。
+3. 以 HEAD 的版本為基準，同一批未 commit 的變更只 bump `plugin.json` 的 `version` 一次；後續修正與擴充沿用該版本。跑 `claude plugin validate . --strict`。
 4. 重跑 `scripts/link-skills.sh`。
 
 ## 硬規則

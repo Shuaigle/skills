@@ -1,7 +1,7 @@
 {
   "name": "shuaigle",
-  "version": "0.6.1",
-  "description": "13 個 agent skills：grill、prototype-logic、to-spec、to-tickets、implement、review、to-docs、retro、tdd、diagnosing-bugs、codebase-design、handoff、writing-great-skills。逐題追蹤決策、邏輯原型、三軸 code review 與 session 環境回顧。取自 mattpocock/skills 改造，Claude Code 與 Codex 皆可用。",
+  "version": "0.7.0",
+  "description": "14 個 agent skills：grill、prototype-logic、to-spec、to-tickets、implement、review、to-docs、retro、tdd、diagnosing-bugs、codebase-design、handoff、writing-great-skills、jev。逐題決策、邏輯原型、三軸 review、session 回顧與 Jev 任務／skill／subagent 決策；Claude 原生 mod 路由當前請求，Codex Desktop 設定下一回合模型。",
   "author": {
     "name": "Shuaigle",
     "url": "https://github.com/Shuaigle"
@@ -9,7 +9,7 @@
   "homepage": "https://github.com/Shuaigle/skills",
   "repository": "https://github.com/Shuaigle/skills",
   "license": "MIT",
-  "keywords": ["skills", "grill", "interactive-questions", "logic-prototype", "code-review", "retrospective", "tdd", "spec", "tickets", "debugging", "adr", "skill-authoring"],
+  "keywords": ["skills", "grill", "interactive-questions", "logic-prototype", "code-review", "retrospective", "tdd", "spec", "tickets", "debugging", "adr", "skill-authoring", "jev", "model-routing", "skill-routing", "subagent-routing", "claude-mods"],
   "skills": [
     "./skills/grill",
     "./skills/prototype-logic",
@@ -23,6 +23,7 @@
     "./skills/diagnosing-bugs",
     "./skills/codebase-design",
     "./skills/handoff",
-    "./skills/writing-great-skills"
+    "./skills/writing-great-skills",
+    "./skills/jev"
   ]
 }
