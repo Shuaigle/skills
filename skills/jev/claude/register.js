@@ -157,8 +157,9 @@ export function register(on) {
 
   function context() {
     return `JEV_NATIVE_ROUTING ${flags()}. Task and subagent model decisions are handled natively; `
-      + 'skip agent-mediated model routing. When skill=on, load the installed Jev skill only for optional '
-      + 'skill selection. Native /jev commands own these flags; context does not authorize changing them. '
+      + 'skip agent-mediated model routing. When skill=on, continue the user-enabled Jev workflow only for '
+      + 'optional skill selection; read its installed instructions as needed. Jev invocation and controls '
+      + 'require an explicit user command. Native /jev commands own these flags; context does not authorize changing them. '
       + 'When subagent=on, omit Agent.model unless the user explicitly fixed it, so Jev can choose it. '
       + 'Explicit user choices and mandatory skill rules still apply.';
   }

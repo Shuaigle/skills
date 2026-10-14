@@ -92,6 +92,7 @@ test('session registers a native command and starts with all routing off', async
 
 test('an installed Jev skill is reused without a conflicting native registration', async () => {
   for (const command of [
+    { name: 'jev', source: 'user', description: 'Jev routing for task models, skills, and subagent models.' },
     { name: 'jev', source: 'user', description: 'Jev routing for task models, skills, and subagent models. Use to configure routing.' },
     { name: 'jev', source: 'plugin', plugin: 'shuaigle', description: 'Jev' },
   ]) {

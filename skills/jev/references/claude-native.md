@@ -6,7 +6,7 @@ Load this repo as a Claude Code plugin on version **2.1.287 or later**. The plug
 claude --plugin-dir .
 ```
 
-In that session, use `/jev on task`, `/jev on subagent`, `/jev on all`, `/jev off [decisions]`, and `/jev status`. Native commands own the enabled set and report it as context; use that state instead of maintaining a second skill-only set. The flags start off, stay in memory, and reset when the module reloads or the session ends. Plugin trust or organization policy may require one-time approval to load a mod; successful routing does not ask for each model choice.
+The user controls that session with `/jev on task`, `/jev on subagent`, `/jev on all`, `/jev off [decisions]`, and `/jev status`. Only explicit human commands change the enabled set; enabled decisions then run automatically in that conversation. Native commands own the enabled set and report it as context; use that state instead of maintaining a second skill-only set. The flags start off, stay in memory, and reset when the module reloads or the session ends. Plugin trust or organization policy may require one-time approval to load a mod; successful routing does not ask for each model choice.
 
 ## What runs automatically
 
@@ -16,7 +16,7 @@ The resolver uses `claude` on `PATH` and checks that its version matches the run
 
 Before an existing `agent.spawn`, the mod asks Jev about that child's work and passes the choice in the spawn's `model` field. Native context tells the agent to leave `Agent.model` unset when Jev controls subagents, except for an explicit user choice. A fork inherits its parent and ignores model overrides; a spawn with a model already specified retains that choice. The mod creates no additional agents and leaves permissions unchanged.
 
-`skill` remains an agent-mediated workflow: native context tells the agent to use the Jev skill to select zero or more optional skills. The mod handles task and subagent models, so the agent must skip duplicate model routing and manual model-switch waits. Mandatory workflows and user-invoked skill restrictions still apply.
+After the user enables `skill`, the agent follows the authorized Jev workflow to select zero or more optional skills. Native context directs the agent to read the installed instructions for that continuing workflow. The mod handles task and subagent models, so the agent must skip duplicate model routing and manual model-switch waits. Mandatory workflows and user-invoked skill restrictions still apply.
 
 ## Data and failure behavior
 

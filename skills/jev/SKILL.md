@@ -1,9 +1,12 @@
 ---
 name: jev
-description: Jev routing for task models, skills, and subagent models. Use to configure routing, begin a task with enabled decisions, or choose a model before spawning a subagent.
+description: Jev routing for task models, skills, and subagent models.
+disable-model-invocation: true
 ---
 
 # Jev
+
+Start Jev only through an explicit human invocation or Jev control command. After the user enables decisions, continue their routing in this conversation under that authorization. Agents and other skills cannot invoke Jev or enable its decisions on their own.
 
 Let Jev choose a task model, zero or more optional skills, or a subagent model from live candidates. Enable each decision independently; the host applies the choices.
 
@@ -46,4 +49,4 @@ Apply every eligible skill in `decisions.skill.choices`; an empty list adds no o
 
 Ask before each actual spawn, after defining that child's goal and constraints. Pass the validated model in the spawn tool's supported model field; preserve compatible reasoning settings. Where model overrides require fresh context, supply a self-contained brief if the workflow permits it. Otherwise report the constraint and retain inheritance. A rejected model falls back to inheritance with a visible routing failure; create no replacement chat or CLI process.
 
-Include the intended model and all selected child skills in the child brief; the spawn request is application evidence, while host-reported runtime metadata is verification when available. Pass enabled decisions and preferences explicitly if children may delegate again; fresh child context otherwise lacks them. Mark the child's initial model and skill choices as already consumed so it applies them without rerouting on startup. Follow-ups to an existing agent do not create a new spawn decision.
+Include the intended model and all selected child skills in the child brief; the spawn request is application evidence, while host-reported runtime metadata is verification when available. Pass the user's authorized enabled decisions, preferences, and routing instructions explicitly if children may delegate again; fresh child context otherwise lacks them. Children continue that authorization without invoking Jev as a new skill. Mark the child's initial model and skill choices as already consumed so it applies them without rerouting on startup. Follow-ups to an existing agent do not create a new spawn decision.

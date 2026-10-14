@@ -47,15 +47,15 @@ cd skills && ./scripts/link-skills.sh
 | [codebase-design](./skills/codebase-design/SKILL.md) | model | Deep module 詞彙與原則：小介面隱藏大量行為，並選定清楚的 seam |
 | [handoff](./skills/handoff/SKILL.md) | user | 把對話壓縮成交接文檔給下一個 agent |
 | [writing-great-skills](./skills/writing-great-skills/SKILL.md) | user | 寫與改 skill 的參考：invocation 取捨、資訊層級、環境真相、剪枝、leading words、失效模式 |
-| [jev](./skills/jev/SKILL.md) | model | 對話內獨立開關任務模型、零到多個 skills 與 subagent 模型決策；Claude 原生 mod 自動路由當前請求，Codex Desktop 可自動設定下一回合模型 |
+| [jev](./skills/jev/SKILL.md) | user | 使用者啟用後，在目前對話獨立路由任務模型、零到多個 skills 與 subagent 模型；Claude 原生 mod 自動路由當前請求，Codex Desktop 可自動設定下一回合模型 |
 
 觸發欄：user = 打名字才會動；model = agent 自行判斷時機，也可手動。
 
-`jev` 有三個獨立選項：`task` 決定主對話模型、`skill` 可不選或選一到多個可自動呼叫的 skills、`subagent` 在每次預定派工前決定該子任務的模型。`jev on` 維持只開啟 `task`；`jev on skill subagent` 累加這兩項，`jev off task` 只關閉主模型決策，`jev on all` 全開，`jev off` 全關，`jev status` 列出三項狀態。新對話預設全關。Claude Code plugin 用 `/shuaigle:jev on skill subagent`，裸 skill 用 `/jev on skill subagent`，Codex 用 `$jev on skill subagent`。
+`jev` 只能由使用者明確呼叫或啟用；啟用的決策會在目前對話自動執行。它有三個獨立選項：`task` 決定主對話模型、`skill` 可不選或選一到多個可自動呼叫的 skills、`subagent` 在每次預定派工前決定該子任務的模型。`jev on` 維持只開啟 `task`；`jev on skill subagent` 累加這兩項，`jev off task` 只關閉主模型決策，`jev on all` 全開，`jev off` 全關，`jev status` 列出三項狀態。新對話預設全關。Claude Code plugin 用 `/shuaigle:jev on skill subagent`，裸 skill 用 `/jev on skill subagent`，Codex 用 `$jev on skill subagent`。
 
 同一任務的決策合併送出；subagent 使用自己的子任務摘要與 spawn 工具支援的模型清單。只傳摘要與去除私人資訊的候選描述。使用者明確指定的模型、skill，以及手動限定 skill 的政策優先；開啟 subagent 決策不會額外建立 agent。Codex Desktop 的 Jev 切換會設定原對話的下一回合模型，不能改已執行中的回合；須用 turn metadata 確認實際套用。需要在目前回合開始前換模型時，宿主需提供可控制該回合的 app-server 整合。其他沒有同對話切換介面的宿主，回報推薦並依原對話手動切換流程處理。
 
-Claude 原生 mod 載入後，用 `/jev on task` 或 `/jev on subagent` 啟用自動模型路由；`/jev on all` 全開。它在實際請求送出前套用 Jev 的選擇，不必逐次手動確認，也不會另開對話。`/jev status` 區分推薦模型與宿主回報的實際模型；`/model` 的預設選項可以保持原值。原生路徑只把本地萃取的任務類型、複雜度等特徵交給 Jev，不傳完整 prompt。`skill` 仍由 agent 依現有流程選擇；runtime 旗標只存在記憶體，mod 重載或 session 結束即重設。
+Claude 原生 mod 載入後，由使用者輸入 `/jev on task` 或 `/jev on subagent` 啟用自動模型路由；`/jev on all` 全開。它在實際請求送出前套用 Jev 的選擇，不必逐次手動確認，也不會另開對話。`/jev status` 區分推薦模型與宿主回報的實際模型；`/model` 的預設選項可以保持原值。原生路徑只把本地萃取的任務類型、複雜度等特徵交給 Jev，不傳完整 prompt。使用者啟用 `skill` 後，agent 依已啟用的 Jev 流程選擇 skills；runtime 旗標只存在記憶體，mod 重載或 session 結束即重設。
 
 典型流程：`grill docs` 對齊 → `to-spec` 出規格 → `to-tickets` 拆票 → `implement` 實作（內部走 `tdd`）→ 換 session（最好換模型）跑 `review` → `to-docs` 沉澱 → 卡住用 `diagnosing-bugs`。
 

@@ -11,9 +11,9 @@
     {
       "name": "shuaigle",
       "source": "./",
-      "description": "14 個 agent skills：grill、prototype-logic、to-spec、to-tickets、implement、review、to-docs、retro、tdd、diagnosing-bugs、codebase-design、handoff、writing-great-skills、jev。逐題決策、邏輯原型、三軸 review、session 回顧與 Jev 任務模型／零到多個 skills／subagent 模型決策；Claude 原生 mod 路由當前請求，Codex Desktop 設定下一回合模型。",
+      "description": "14 個 agent skills：grill、prototype-logic、to-spec、to-tickets、implement、review、to-docs、retro、tdd、diagnosing-bugs、codebase-design、handoff、writing-great-skills、jev。逐題決策、邏輯原型、三軸 review、session 回顧與使用者啟用的 Jev 任務模型／零到多個 skills／subagent 模型決策；Claude 原生 mod 路由當前請求，Codex Desktop 設定下一回合模型。",
       "category": "engineering",
-      "keywords": ["skills", "grill", "interactive-questions", "logic-prototype", "code-review", "retrospective", "tdd", "spec", "tickets", "debugging", "adr", "skill-authoring", "jev", "model-routing", "skill-routing", "multi-select", "subagent-routing", "claude-mods"]
+      "keywords": ["skills", "grill", "interactive-questions", "logic-prototype", "code-review", "retrospective", "tdd", "spec", "tickets", "debugging", "adr", "skill-authoring", "jev", "user-invoked", "model-routing", "skill-routing", "multi-select", "subagent-routing", "claude-mods"]
     }
   ]
 }

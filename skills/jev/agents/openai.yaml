@@ -1,5 +1,5 @@
 interface:
   display_name: "Jev"
-  short_description: "Choose models and zero or more optional skills with Jev"
+  short_description: "Manually enable Jev model and optional skill routing"
 policy:
-  allow_implicit_invocation: true
+  allow_implicit_invocation: false
