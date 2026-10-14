@@ -21,8 +21,10 @@ SECRET = "test-env-secret-please-never-echo"
 def child_request():
     return {"host": "test-host", "task": "Rename a local variable in a delegated unit",
             "decisions": {"subagent": [
-                {"id": "fast", "description": "Fast model for simple child tasks"},
-                {"id": "deep", "description": "Stronger reasoning for hard child tasks"}]},
+                {"id": "fast", "model": "fast", "effort": "low",
+                 "description": "Fast model for simple child tasks"},
+                {"id": "deep", "model": "deep", "effort": "high",
+                 "description": "Stronger reasoning for hard child tasks"}]},
             "preference": "Prefer low latency"}
 
 
@@ -36,8 +38,10 @@ def answer():
 def batch(scopes=("skill", "subagent")):
     choices = {
         "skill": [{"id": "test-first", "description": "Implement a feature using tests"}],
-        "subagent": [{"id": "child-fast", "description": "Fast for small delegated tasks"},
-                     {"id": "child-deep", "description": "Deeper reasoning for child tasks"}],
+        "subagent": [{"id": "child-fast", "model": "child-fast", "effort": "low",
+                      "description": "Fast for small delegated tasks"},
+                     {"id": "child-deep", "model": "child-deep", "effort": "high",
+                      "description": "Deeper reasoning for child tasks"}],
     }
     return {"host": "test-host", "task": "Check a delegated change",
             "decisions": {scope: choices[scope] for scope in scopes},
@@ -101,7 +105,8 @@ class InputTests(unittest.TestCase):
     def test_one_and_255_candidates_are_valid(self):
         for count in (1, 255):
             value = {**child_request(), "decisions": {"subagent": [
-                {"id": str(i), "description": "model"} for i in range(count)]}}
+                {"id": str(i), "model": str(i), "effort": "low",
+                 "description": "model"} for i in range(count)]}}
             self.assertEqual(len(route.validate_input(value)["subagent"]), count)
 
 
@@ -137,7 +142,8 @@ class RequestTests(unittest.TestCase):
             "deep": child_request()["decisions"]["subagent"][1]["description"]})
         self.assertEqual(result, {"status": "recommended", "host": "test-host",
                                  "decisions": {"subagent": {
-                                     "choice": "fast", "confidence": 0.81,
+                                     "choice": "fast", "model": "fast", "effort": "low",
+                                     "confidence": 0.81,
                                      "probabilities": {"fast": 0.88, "deep": 0.12}}},
                                  "router_model": "jev-1.13.0"})
         self.connection.close.assert_called_once()
@@ -424,6 +430,96 @@ class BatchTests(unittest.TestCase):
             body=batch_answer(value) if body is None else body)
         return route.route(value)
 
+    def test_model_effort_pairs_and_skills_share_one_request(self):
+        value = batch()
+        value["decisions"]["subagent"] = [
+            {"id": "quick", "model": "child-fast", "effort": "low",
+             "description": "Fast model with light reasoning"},
+            {"id": "careful", "model": "child-fast", "effort": "high",
+             "description": "Same model with deeper reasoning"},
+            {"id": "strong", "model": "child-deep", "effort": "medium",
+             "description": "Stronger model for harder work"},
+        ]
+        result = self.recommend(value, batch_answer(value, {"subagent": "careful"}))
+        selected = result["decisions"]["subagent"]
+        self.assertEqual(selected["choice"], "careful")
+        self.assertEqual(selected["model"], "child-fast")
+        self.assertEqual(selected["effort"], "high")
+        self.connection.request.assert_called_once()
+        payload = json.loads(self.connection.request.call_args.kwargs["body"])
+        self.assertEqual(set(payload["questions"]), {"skill_0", "subagent"})
+        question = payload["questions"]["subagent"]
+        self.assertEqual(set(question["criteria"]), {"quick", "careful", "strong"})
+        self.assertEqual(question["instructions"]["options"]["careful"],
+                         {"model": "child-fast", "effort": "high"})
+        self.assertEqual(result["decisions"]["skill"]["choices"], ["test-first"])
+
+    def test_pair_metadata_comes_from_candidates_and_null_is_preserved(self):
+        value = batch(("subagent",))
+        value["decisions"]["subagent"] = [
+            {"id": "host-default", "model": "child-fast", "effort": None,
+             "description": "Host supports this model with default effort only"}]
+        body = batch_answer(value)
+        body["answers"]["subagent"].update(model="unavailable", effort="invented")
+        decision = self.recommend(value, body)["decisions"]["subagent"]
+        self.assertEqual((decision["model"], decision["effort"]), ("child-fast", None))
+
+    def test_missing_effort_inventory_still_routes_live_models_and_skills_together(self):
+        value = batch()
+        value["decisions"]["subagent"] = [
+            {"id": "model-only-1", "model": "child-fast", "effort": None,
+             "description": "Live host model; effort inventory unavailable, use host defaults"},
+            {"id": "model-only-2", "model": "child-deep", "effort": None,
+             "description": "Live host model; effort inventory unavailable, use host defaults"},
+        ]
+        result = self.recommend(value, batch_answer(value, {"subagent": "model-only-2"}))
+        self.assertEqual(result["status"], "recommended")
+        self.assertEqual(result["decisions"]["skill"]["choices"], ["test-first"])
+        decision = result["decisions"]["subagent"]
+        self.assertEqual((decision["model"], decision["effort"]), ("child-deep", None))
+        self.connection.request.assert_called_once()
+        payload = json.loads(self.connection.request.call_args.kwargs["body"])
+        self.assertEqual(set(payload["questions"]), {"skill_0", "subagent"})
+        self.assertTrue(all(option["effort"] is None for option in
+                            payload["questions"]["subagent"]["instructions"]["options"].values()))
+
+    def test_incomplete_duplicate_or_malformed_pairs_never_connect(self):
+        original = {"id": "quick", "model": "child-fast", "effort": "low",
+                    "description": "A verified model and effort combination"}
+        variants = []
+        for field in ("model", "effort"):
+            missing = dict(original)
+            del missing[field]
+            variants.append([missing])
+        for field, invalid in (("model", ""), ("model", []), ("effort", ""),
+                               ("effort", False), ("effort", [])):
+            variants.append([{**original, field: invalid}])
+        variants.append([{**original, "unknown": "value"}])
+        variants.append([original, {**original, "id": "same-pair-another-id"}])
+        variants.append([original, {**original, "id": "skip-effort", "effort": None}])
+        for candidates in variants:
+            value = batch(("subagent",))
+            value["decisions"]["subagent"] = candidates
+            with self.subTest(candidates=candidates), self.assertRaises(route.RoutingError) as error:
+                route.route(value)
+            self.assertEqual(error.exception.code, "invalid_input")
+        self.factory.assert_not_called()
+
+    def test_keys_in_raw_model_and_effort_metadata_never_connect(self):
+        for key in ('pair-key"suffix', 'pair-key\\suffix'):
+            for field in ("model", "effort"):
+                value = batch(("subagent",))
+                value["decisions"]["subagent"] = [
+                    {"id": "quick", "model": "child-fast", "effort": "low",
+                     "description": "A verified model and effort combination"}]
+                value["decisions"]["subagent"][0][field] = key
+                # Keep the effort fixture within its public field-length bound.
+                with self.subTest(field=field), patch.dict(route.os.environ, {"JEV_API_KEY": key}):
+                    with self.assertRaises(route.RoutingError) as error:
+                        route.route(value)
+                    self.assertEqual(error.exception.code, "unsafe_input")
+        self.factory.assert_not_called()
+
     def test_selects_multiple_skills_in_one_request(self):
         value = batch(("skill",))
         value["decisions"]["skill"] = [
@@ -495,8 +591,11 @@ class BatchTests(unittest.TestCase):
                                     for item in value["decisions"][scope]}
                         self.assertEqual(question["criteria"], expected)
                         reply = batch_answer(value)["answers"][scope]
+                        selected_option = next(item for item in value["decisions"][scope]
+                                               if item["id"] == reply["choice"])
                         self.assertEqual(result["decisions"][scope], {
-                            key: reply[key] for key in ("choice", "confidence", "probabilities")})
+                            **{key: reply[key] for key in ("choice", "confidence", "probabilities")},
+                            "model": selected_option["model"], "effort": selected_option["effort"]})
                     self.factory.assert_called_once()
 
     def test_all_off_returns_disabled_without_key_or_network(self):
@@ -616,8 +715,10 @@ class BatchTests(unittest.TestCase):
             for count in (minimum, maximum, maximum + 1):
                 with self.subTest(scope=scope, count=count):
                     value = batch((scope,))
-                    value["decisions"][scope] = [{"id": str(i), "description": "Available"}
-                                                  for i in range(count)]
+                    value["decisions"][scope] = [
+                        {"id": str(i), "description": "Available", **(
+                            {"model": str(i), "effort": "low"} if scope == "subagent" else {})}
+                        for i in range(count)]
                     if count > maximum:
                         with self.assertRaises(route.RoutingError) as error:
                             route.route(value)

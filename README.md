@@ -56,17 +56,19 @@ cd skills && ./scripts/link-skills.sh
 | [codebase-design](./skills/codebase-design/SKILL.md) | model | Deep module 詞彙與原則：小介面隱藏大量行為，並選定清楚的 seam |
 | [handoff](./skills/handoff/SKILL.md) | user | 把對話壓縮成交接文檔給下一個 agent |
 | [writing-great-skills](./skills/writing-great-skills/SKILL.md) | user | 寫與改 skill 的參考：invocation 取捨、資訊層級、環境真相、剪枝、leading words、失效模式 |
-| [jev](./skills/jev/SKILL.md) | user | 使用者啟用後，在目前對話選零到多個 skills 與 subagent 模型；每個獨立子任務只問一次並重用決策，Codex hooks／Claude 原生 mod 套用子模型 |
+| [jev](./skills/jev/SKILL.md) | user | 使用者啟用後，在目前對話選零到多個 skills 與宿主支援的 subagent 模型／effort 組合；每個獨立子任務只問一次並重用決策 |
 
 觸發欄：user = 打名字才會動；model = agent 自行判斷時機，也可手動。
 
-`jev` 只能由使用者明確呼叫或啟用；啟用的決策會在目前對話自動執行。兩個獨立選項：`skill` 可不選或選一到多個可自動呼叫的 skills，`subagent` 在預定派工前決定該子任務的模型。`jev on` 與 `jev on all` 都開啟兩項；`jev on subagent` 累加該項，`jev off skill` 只關閉 skill 決策，`jev off` 全關，`jev status` 列出兩項狀態。新對話預設全關。Claude Code plugin 用 `/shuaigle:jev on`，裸 skill 用 `/jev on`，Codex skill 用 `$jev on`；Codex hooks 建議用人類訊息第一行的 `jev on`。主對話沿用原本模型。
+`jev` 只能由使用者明確呼叫或啟用；啟用的決策會在目前對話自動執行。兩個獨立選項：`skill` 可不選或選一到多個可自動呼叫的 skills，`subagent` 在預定派工前一起決定該子任務的模型與 effort。Effort 屬於 `subagent`，不新增開關。`jev on` 與 `jev on all` 都開啟兩項；`jev on subagent` 累加該項，`jev off skill` 只關閉 skill 決策，`jev off` 全關，`jev status` 列出兩項狀態。新對話預設全關。Claude Code plugin 用 `/shuaigle:jev on`，裸 skill 用 `/jev on`，Codex skill 用 `$jev on`；Codex hooks 建議用人類訊息第一行的 `jev on`。主對話沿用原本模型。
 
-每個獨立子任務把啟用的決策合併問一次，後續讀檔與追問重用結果；例如十個相關檔案的讀取與摘要算一個子任務。目標、候選或偏好改變時建立新子任務。subagent 使用自己的摘要與 spawn 工具支援的模型清單。只傳摘要與去除私人資訊的候選描述。使用者指定的模型、skill，以及手動限定 skill 的政策優先；開啟 subagent 決策不會額外建立 agent。批次讀檔適合以精簡上下文交給 Jev 選出的子模型，短讀取可直接留在主對話。
+每個獨立子任務把啟用的決策合併問一次，後續讀檔與追問重用結果；例如十個相關檔案的讀取與摘要算一個子任務。目標、候選或偏好改變時建立新子任務。subagent 使用自己的摘要與 spawn 工具支援的模型／effort 組合，以一個原子選項一起決定；具體 effort 只列已驗證的組合。Null 表示 effort 由宿主控制，也可用於 Claude 缺 effort 能力清單時明示的 model-only fallback，保留模型與 skill 決策；同一模型不能混列 null 和具體 effort。只傳摘要與去除私人資訊的候選描述。使用者指定的模型、effort、skill，以及手動限定 skill 的政策優先；已指定 effort 卻缺逐模型能力證據時，保留該 effort 與原本子模型，回報限制。開啟 subagent 決策不會額外建立 agent。批次讀檔適合以精簡上下文交給 Jev 選出的子模型，短讀取可直接留在主對話。
 
-Codex hooks 在涵蓋的工具路徑上要求先取得子任務決策，並把已準備的 spawn 改為 Jev 選出的模型。快取保留目前對話的旗標、雜湊與最小決策，不保存金鑰、原始任務或 child brief；路由失敗也會重用該次 fallback。resume／compact 保留狀態，新的、fork 或 clear 對話重設全關。hooks 無法辨識所有語意上的任務邊界，特殊工具是否涵蓋取決於宿主，需在實際宿主確認。
+Codex hooks 在涵蓋的工具路徑上要求先取得子任務決策，路由前依宿主的逐模型能力清單驗證候選組合，再把已準備的 spawn 改為 Jev 選出的模型與 `reasoning_effort`；null 會清除舊 effort 欄位。快取保留目前對話的旗標、雜湊與最小決策，不保存金鑰、原始任務或 child brief；路由失敗也會重用該次 fallback。resume／compact 保留狀態，新的、fork 或 clear 對話重設全關。hooks 無法辨識所有語意上的任務邊界，特殊工具是否涵蓋取決於宿主，需在實際宿主確認。
 
-Claude 原生 mod 載入後，由使用者輸入 `/jev on` 全開，或 `/jev on subagent` 累加啟用子模型路由。只有 `subagent` 開啟時，mod 在預定 spawn 前詢問 Jev，依該次 spawn 的識別重用成功或失敗決策；此原生分支的 status 回報推薦與實際子模型。兩項全開時，agent 對 child unit 一次批次詢問 skill＋subagent，把模型填入 `Agent.model`、skills 放入 brief；mod 保留準備結果，失敗則沿用繼承模型，不再問第二次。這個混合流程依賴 agent 準備，沒有原生 receipt 強制檢查。只開 `skill` 或本地工作由 agent 選 skills 並重用。旗標只存在記憶體，mod 重載或 session 結束即重設。詳見 [Claude 路由](./skills/jev/references/claude-native.md)。
+Claude 原生 mod 載入後，只有 `subagent` 開啟時由 mod 在預定 spawn 前詢問 Jev，依該次 spawn 的識別重用成功或失敗決策；status 回報推薦與實際子模型。目前 native spawn 介面沒有可驗證的 effort 覆寫欄位／逐模型能力清單，該路徑用 null，effort 仍由宿主控制。這不代表 Claude 的其他派工介面不能設定 effort。
+
+Claude 內建 Agent 工具在 `2.1.292+` 支援非 fork 的逐次 effort。兩項全開時，agent 對 child unit 一次批次詢問 skill＋模型／effort 選項；有可信矩陣時精確套用 Jev 選出的 `Agent.model`／`Agent.effort`，skills 放入 brief。缺矩陣時仍用已驗證模型的 `effort: null` 選項與 skills 同批詢問，effort 留給宿主預設並明示未路由；不能把工具的 effort enum 直接乘上全部模型。Mod 不再問第二次；API 或回應驗證失敗時整批沿用原設定。這個混合流程依賴 agent 準備，沒有原生 receipt 強制檢查。只開 `skill` 或本地工作由 agent 選 skills 並重用。旗標只存在記憶體，mod 重載或 session 結束即重設。詳見 [Claude 路由](./skills/jev/references/claude-native.md)。
 
 典型流程：`grill docs` 對齊 → `to-spec` 出規格 → `to-tickets` 拆票 → `implement` 實作（內部走 `tdd`）→ 換 session（最好換模型）跑 `review` → `to-docs` 沉澱 → 卡住用 `diagnosing-bugs`。
 

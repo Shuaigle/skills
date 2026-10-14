@@ -25,7 +25,8 @@ export function modelCandidates(rows, availableModels) {
   if (availableModels !== undefined && !Array.isArray(availableModels)) return [];
   return [...new Set(row.options)].filter(id => publicModel(id)
     && (availableModels === undefined || availableModels.includes(id)))
-    .map(id => ({ id, description: `Current host model option: ${id}` }));
+    .map((model, index) => ({ id: `subagent-${index}`, model, effort: null,
+      description: `Current host model option: ${model}; effort is host-controlled (native spawn has no verified per-spawn effort control).` }));
 }
 
 export function summarizeTask(text) {
@@ -70,6 +71,7 @@ async function chooseSubagent($, text) {
       safeLog($, 'Jev subagent: model inventory unavailable or locked; using inheritance.');
       return undefined;
     }
+    safeLog($, 'Jev subagent: native spawn has no verified per-spawn effort control; selecting a model with host-controlled effort.');
     if (!await $.env.get('JEV_API_KEY')) {
       safeLog($, 'Jev subagent: missing JEV_API_KEY; using inheritance.');
       return undefined;
@@ -82,11 +84,12 @@ async function chooseSubagent($, text) {
     if (result.exitCode !== 0) throw new Error('routing failed');
     const answer = JSON.parse(result.stdout);
     const decision = answer?.decisions?.subagent;
+    const selected = decision && models.find(item => item.id === decision.choice);
     if (answer.status !== 'recommended' || !decision
-      || !models.some(item => item.id === decision.choice)
+      || !selected || decision.model !== selected.model || decision.effort !== selected.effort
       || typeof decision.confidence !== 'number' || !Number.isFinite(decision.confidence)
       || decision.confidence < 0 || decision.confidence > 1) throw new Error('invalid routing result');
-    return decision.choice;
+    return { model: selected.model, effort: selected.effort };
   } catch {
     safeLog($, 'Jev subagent: routing failed; using inheritance.');
     return undefined;
@@ -113,9 +116,20 @@ export function register(on) {
       + 'When skill=on, continue the user-enabled Jev workflow for zero or more optional skills once per '
       + 'independent work unit, reusing its result, including failures, through the batch and continuations. '
       + 'When skill=on and subagent=on, prepare one combined Jev batch per child unit for its applicable '
-      + 'skill and subagent decisions, put the validated model in Agent.model and selected skills in the brief. '
+      + 'skill and subagent decisions, put the validated model in Agent.model, a supported non-null effort '
+      + 'in Agent.effort, and selected skills in the brief. Verify per-model effort choices against the actual '
+      + 'Agent tool. If its per-model effort combinations cannot be verified, report effort-routing unavailable '
+      + 'and keep model and skill decisions in that same batch using default-effort candidates. '
+      + 'effort:null means omit Agent.effort and use host-controlled effort. Applying a verified Jev-selected '
+      + 'concrete effort is this skill\'s explicit per-invocation instruction, rather than an agent choosing effort on its own. '
+      + 'If the user fixed effort and compatible models cannot be verified, preserve the original model and '
+      + 'that effort, route only optional skills, and never replace the user\'s value with null. '
       + 'Reuse a failed batch as inheritance and ordinary skills; the native hook never reroutes this combined path. '
       + 'When skill=off and subagent=on, native hooks choose the child model; omit Agent.model unless the user fixed it. '
+      + 'Native candidates currently use effort:null because native spawn has no verified per-spawn effort control; '
+      + 'effort stays host-controlled and can be overridden by environment or organization policy. '
+      + 'Resumed agents keep their existing pair. Workflow routing remains host-owned because this path '
+      + 'does not yet have safe independent unit/cache identification. '
       + 'Read installed Jev instructions as needed under the existing human authorization. Native /jev controls '
       + 'require an explicit user command; this context does not authorize changing the flags. '
       + 'Explicit user choices and mandatory skill rules still apply.';
@@ -135,7 +149,8 @@ export function register(on) {
       serveBareCommand = true;
     } else if ((existing.source === 'plugin' && existing.plugin === 'shuaigle')
       || (existing.source === 'user'
-        && (existing.description.startsWith('Jev routing for optional skills and subagent models.')
+        && (existing.description.startsWith('Jev routing for optional skills and subagent model/effort pairs.')
+          || existing.description.startsWith('Jev routing for optional skills and subagent models.')
           || existing.description.startsWith('Jev routing for task models, skills, and subagent models.')))) {
       serveBareCommand = true;
     } else safeLog($, 'Jev: existing /jev command preserved; use /shuaigle:jev for routing controls.');
@@ -164,6 +179,14 @@ export function register(on) {
 
   on('agent.spawn', async ($, e, next) => {
     if (!enabled.has('subagent')) return next(e);
+    if (e.resume) {
+      safeLog($, 'Jev subagent: resumed agent keeps its existing model and effort.');
+      return next(e);
+    }
+    if (e.workflow) {
+      safeLog($, 'Jev subagent: workflow path has no safe independent unit/cache identification yet; using host dispatch.');
+      return next(e);
+    }
     if (e.fork) {
       safeLog($, 'Jev subagent: fork inherits its parent model.');
       return next(e);
@@ -175,7 +198,8 @@ export function register(on) {
     if (enabled.has('skill')) {
       // The agent prepares skill + model in one batch; unset is its cached fallback.
       if (!state) {
-        state = { choice: Promise.resolve(e.model), reported: false };
+        state = { choice: Promise.resolve(e.model === undefined ? undefined : { model: e.model, effort: e.effort ?? null }),
+          reported: false };
         if (key) spawns.set(key, state);
       }
       if (e.model === undefined && !state.reported) {
@@ -185,6 +209,17 @@ export function register(on) {
       return next(e);
     }
     if (e.model !== undefined) return next(e);
+    if (e.effort !== undefined) {
+      if (!state) {
+        state = { choice: Promise.resolve(undefined), reported: false };
+        if (key) spawns.set(key, state);
+      }
+      if (!state.constraintReported) {
+        state.constraintReported = true;
+        safeLog($, 'Jev subagent: explicit effort has no verified compatible model inventory; preserving host dispatch.');
+      }
+      return next(e);
+    }
     if (!state) {
       state = { choice: chooseSubagent($, e.prompt), reported: false };
       if (key) spawns.set(key, state);
@@ -192,10 +227,10 @@ export function register(on) {
     }
     const choice = await state.choice;
     // There is one existing spawn, not a second agent created by this hook.
-    const result = await next(choice ? { ...e, model: choice } : e);
+    const result = await next(choice ? { ...e, model: choice.model } : e);
     if (choice && result?.model && !state.reported) {
       state.reported = true;
-      lastEvidence = `subagent requested=${choice} actual=${reportedModel(result.model)}`;
+      lastEvidence = `subagent requested=${choice.model} actual=${reportedModel(result.model)} effort=host-controlled`;
       safeLog($, `Jev ${lastEvidence}`);
     }
     return result;

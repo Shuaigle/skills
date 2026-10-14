@@ -57,7 +57,7 @@ def identifier(value):
 
 
 def blank_state():
-    return {"version": 2, "enabled": [], "turn": None,
+    return {"version": 3, "enabled": [], "turn": None,
             "pending": False, "active": None, "prepared": {}, "units": {}}
 
 
@@ -115,14 +115,14 @@ def locked_state(session_id, state_dir=None):
                 raw = source.read(MAX_STATE_BYTES + 1)
             require(len(raw) <= MAX_STATE_BYTES, "invalid_state")
             state = json.loads(raw, object_pairs_hook=unique_object)
-            require(isinstance(state, dict) and state.get("version") in {1, 2}
+            require(isinstance(state, dict) and state.get("version") in {1, 2, 3}
                     and isinstance(state.get("units"), dict)
                     and isinstance(state.get("enabled"), list)
                     and set(state["enabled"]) <= (SCOPES | {"task"}
                          if state["version"] == 1 else SCOPES), "invalid_state")
-            if state["version"] == 1:
+            if state["version"] < 3:
                 # Preserve existing human authorization, never resurrect the
-                # retired task scope or reuse receipts from its old contract.
+                # retired task scope or interpret old model IDs as option IDs.
                 enabled = sorted(set(state["enabled"]) & SCOPES)
                 state = blank_state()
                 state["enabled"] = enabled
@@ -261,12 +261,15 @@ def validate_begin(data):
     else:
         require("spawn" not in data)
     efforts = data.get("efforts", {})
-    require(isinstance(efforts, dict))
-    model_ids = set(candidates.get("subagent", {}))
-    require(set(efforts) <= model_ids)
-    for values in efforts.values():
+    require(isinstance(efforts, dict) and len(efforts) <= 255)
+    for model, values in efforts.items():
+        require(route.valid_text(model, 256))
         require(isinstance(values, list) and all(route.valid_text(item, 32) for item in values)
                 and len(values) <= 16 and len(set(values)) == len(values))
+    for option in candidates.get("subagent", {}).values():
+        require(option["model"] in efforts)
+        supported = efforts[option["model"]]
+        require(option["effort"] in supported if supported else option["effort"] is None)
     key = os.environ.get("JEV_API_KEY")
     require(not key or not route.contains_secret(data, key), "unsafe_input")
     require(len(json.dumps(data, ensure_ascii=False, allow_nan=False).encode()) <= MAX_BYTES)
@@ -305,7 +308,11 @@ def minimal_result(result, candidates):
             require(isinstance(answer.get("choice"), str) and answer["choice"] in inventory
                     and route.probability(answer.get("confidence")),
                     "invalid_response")
-            saved[scope] = {"choice": answer["choice"], "confidence": answer["confidence"]}
+            option = inventory[answer["choice"]]
+            require(answer.get("model") == option["model"] and "effort" in answer
+                    and answer["effort"] == option["effort"], "invalid_response")
+            saved[scope] = {"choice": answer["choice"], "model": option["model"],
+                            "effort": option["effort"], "confidence": answer["confidence"]}
     router_model = result.get("router_model")
     require(router_model is None or isinstance(router_model, str)
             and re.fullmatch(r"jev-[A-Za-z0-9._-]{1,64}", router_model), "invalid_response")
@@ -346,12 +353,8 @@ def begin_unit(data, state_dir=None):
                     result = minimal_result(route.route(data["request"]), candidates)
             except (route.RoutingError, GateError) as error:
                 result = {"status": "fallback", "code": error.code, "decisions": {}}
-            selected_model = result["decisions"].get("subagent", {}).get("choice")
-            efforts = data.get("efforts", {})
             receipt = {"fingerprint": fingerprint, "kind": data["kind"], "target": data["target"],
-                       "enabled": sorted(enabled), "result": result,
-                       "efforts": {selected_model: efforts[selected_model]}
-                       if selected_model in efforts else {}}
+                       "enabled": sorted(enabled), "result": result}
             if data["target"] == "subagent":
                 receipt["spawn"] = spawn_fingerprint(data["spawn"])
         with locked_state(data["session_id"], state_dir) as state:
@@ -467,14 +470,12 @@ def pre_tool(event, state):
         result = receipt["result"]
         if result["status"] != "recommended" or "subagent" not in result["decisions"]:
             return {}
-        model = result["decisions"]["subagent"]["choice"]
-        updated = {**arguments, "model": model}
-        efforts = receipt.get("efforts", {}).get(model, [])
-        if "reasoning_effort" in updated and updated["reasoning_effort"] not in efforts:
-            if efforts:
-                updated["reasoning_effort"] = efforts[0]
-            else:
-                updated.pop("reasoning_effort")
+        selected = result["decisions"]["subagent"]
+        updated = {**arguments, "model": selected["model"]}
+        if selected["effort"] is None:
+            updated.pop("reasoning_effort", None)
+        else:
+            updated["reasoning_effort"] = selected["effort"]
         return {"hookSpecificOutput": {"hookEventName": "PreToolUse",
                                        "permissionDecision": "allow", "updatedInput": updated}}
     if "skill" not in enabled:
@@ -506,22 +507,31 @@ begin fields:
   target: local | subagent.
   request: route.py batch {host: "codex", task: sanitized summary,
            decisions: {skill?: eligible candidates,
-                       subagent?: live spawn-model candidates},
+                       subagent?: live model-effort option candidates},
            preference?: string}.
            Include exactly the enabled applicable domains: local skill,
-           or child subagent/skill. Candidates are {id, description} objects.
+           or child subagent/skill. Skill candidates are {id, description}.
+           Each child option is exactly {id: opaque option ID, model: host ID,
+           effort: supported effort string or null, description: capability}.
   spawn: exact planned child tool arguments, required only for subagent;
          Codex spawn_agent requires fork_turns: "none" and a self-contained
          message. Model and reasoning_effort are rebound by PreToolUse.
-  efforts: optional {child_model_id: [live supported reasoning efforts]}.
+  efforts: authoritative live {child_model_id: [supported reasoning efforts]}.
+           Required for subagent decisions; cover every candidate model.
+           A nonempty list permits only its efforts. [] permits only null,
+           meaning default-only/no per-spawn effort control. At most 255
+           models and 16 unique effort strings per model; other host models
+           may be present. Unsupported/missing pairs fail before routing.
 
 The same unit_id and immutable input reuse one routing receipt across tools,
 continuations and concurrent duplicate begins. Changed work or inventories
 require a new unit_id. Different units may route concurrently. Failed routing
 is a visible cached fallback to the inherited child model and ordinary
 skills; repeated tools do not retry Jev. Skill choices can contain zero or
-multiple IDs. The main model stays unchanged; routing selects optional skills
-and models only for planned fresh-context children.
+multiple IDs. Jev selects each child's model and effort atomically in that
+same request. The exact pair is applied; null removes an effort override.
+The main model stays unchanged; routing selects optional skills and model-
+effort pairs only for planned fresh-context children.
 
 Bootstrap work gate with exactly:
   python3 <absolute installed codex_gate.py> begin <<'JEV_UNIT'

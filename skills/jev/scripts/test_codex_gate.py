@@ -27,13 +27,17 @@ def unit(scopes=("skill",), **fields):
     inventories = {
         "skill": [{"id": "testing", "description": "Write behavioral tests"},
                   {"id": "docs", "description": "Write documentation"}],
-        "subagent": [{"id": "child-fast", "description": "Fast child"},
-                     {"id": "child-deep", "description": "Deep child"}],
+        "subagent": [{"id": "fast-low", "model": "child-fast", "effort": "low",
+                      "description": "Fast child with low reasoning"},
+                     {"id": "deep-high", "model": "child-deep", "effort": "high",
+                      "description": "Deep child with high reasoning"}],
     }
     result = {"session_id": "session-a", "turn_id": "turn-a", "unit_id": "read-config",
               "kind": "read", "target": "local", "request": {
                   "host": "codex", "task": "Read configuration and return a brief summary",
                   "decisions": {scope: inventories[scope] for scope in scopes}}}
+    if "subagent" in scopes:
+        result["efforts"] = {"child-fast": ["low", "medium"], "child-deep": ["high"]}
     result.update(fields)
     return result
 
@@ -46,6 +50,7 @@ def recommendation(data):
                                 "evaluations": {}}
         else:
             decisions[scope] = {"choice": candidates[0]["id"], "confidence": 0.8,
+                                "model": candidates[0]["model"], "effort": candidates[0]["effort"],
                                 "probabilities": {candidates[0]["id"]: 1.0}}
     return {"status": "recommended", "host": "codex", "router_model": "jev-test",
             "decisions": decisions}
@@ -125,7 +130,7 @@ class GateTests(unittest.TestCase):
             path.write_text(json.dumps(previous))
             self.send("SessionStart", source="resume")
             current = json.loads(path.read_text())
-            self.assertEqual(current["version"], 2)
+            self.assertEqual(current["version"], 3)
             self.assertEqual(current["enabled"], expected)
             self.assertEqual(current["units"], {})
             self.assertEqual(current["prepared"], {})
@@ -155,10 +160,153 @@ class GateTests(unittest.TestCase):
                 rewritten = self.send("PreToolUse", tool_name="spawn_agent", tool_input=spawn)
                 if "subagent" in scopes:
                     updated = rewritten["hookSpecificOutput"]["updatedInput"]
-                    self.assertEqual(updated, {**spawn, "model": "child-fast"})
+                    self.assertEqual(updated, {**spawn, "model": "child-fast", "reasoning_effort": "low"})
                 else:
                     self.assertEqual(rewritten, {})
                 self.assertEqual(self.read(), {})
+
+    def test_child_pair_must_belong_to_authoritative_live_matrix_before_route(self):
+        self.enable("subagent")
+        self.prompt()
+        spawn = {"task_name": "reader", "message": "Summarize a module", "fork_turns": "none"}
+        original = unit(("subagent",), target="subagent", spawn=spawn)
+        cases = []
+        missing = copy.deepcopy(original)
+        missing.pop("efforts")
+        cases.append(missing)
+        uncovered = copy.deepcopy(original)
+        uncovered["efforts"].pop("child-deep")
+        cases.append(uncovered)
+        unsupported = copy.deepcopy(original)
+        unsupported["request"]["decisions"]["subagent"][0]["effort"] = "ultra"
+        cases.append(unsupported)
+        no_control = copy.deepcopy(original)
+        no_control["efforts"]["child-fast"] = []
+        cases.append(no_control)
+        invalid_default = copy.deepcopy(original)
+        invalid_default["request"]["decisions"]["subagent"][0]["effort"] = None
+        cases.append(invalid_default)
+        for data in cases:
+            with self.subTest(data=data), self.assertRaises(gate.GateError) as error:
+                self.begin(data)
+            self.assertEqual(error.exception.code, "invalid_input")
+        self.router.assert_not_called()
+
+    def test_selected_exact_effort_is_applied_and_null_omits_override(self):
+        self.enable("subagent")
+        self.prompt()
+        spawn = {"task_name": "reader", "message": "Summarize a module", "fork_turns": "none",
+                 "model": "child-deep", "reasoning_effort": "high"}
+        data = unit(("subagent",), target="subagent", spawn=spawn)
+        # Medium is legal but is not the first effort in the host matrix.
+        data["request"]["decisions"]["subagent"][0]["effort"] = "medium"
+        result = self.begin(data)
+        self.assertEqual(result["decisions"]["subagent"]["choice"], "fast-low")
+        self.assertEqual(result["decisions"]["subagent"]["model"], "child-fast")
+        self.assertEqual(result["decisions"]["subagent"]["effort"], "medium")
+        updated = self.send("PreToolUse", tool_name="spawn_agent", tool_input=spawn)
+        self.assertEqual(updated["hookSpecificOutput"]["updatedInput"],
+                         {**spawn, "model": "child-fast", "reasoning_effort": "medium"})
+        null_data = copy.deepcopy(data)
+        null_data["unit_id"] = "default-only-child"
+        null_data["efforts"]["child-fast"] = []
+        null_data["request"]["decisions"]["subagent"][0]["effort"] = None
+        self.begin(null_data)
+        updated = self.send("PreToolUse", tool_name="spawn_agent", tool_input=spawn)
+        expected = {**spawn, "model": "child-fast"}
+        expected.pop("reasoning_effort")
+        self.assertEqual(updated["hookSpecificOutput"]["updatedInput"], expected)
+
+    def test_router_cannot_return_a_model_effort_pair_other_than_selected_option(self):
+        self.enable("subagent")
+        self.prompt()
+        spawn = {"task_name": "reader", "message": "Summarize a module", "fork_turns": "none"}
+        for index, changed in enumerate(({"model": "child-deep"}, {"effort": "medium"},
+                                         {"effort": None})):
+            data = unit(("subagent",), target="subagent", spawn=spawn,
+                        unit_id="mismatched-pair-" + str(index))
+            result = recommendation(data["request"])
+            result["decisions"]["subagent"].update(changed)
+            self.router.side_effect = None
+            self.router.return_value = result
+            self.assertEqual(self.begin(data)["status"], "fallback")
+            self.assertTrue(self.begin(data)["cached"])
+            self.assertEqual(self.send("PreToolUse", tool_name="spawn_agent", tool_input=spawn), {})
+        self.assertEqual(self.router.call_count, 3)
+
+    def test_v2_cached_model_choice_is_not_reused_as_an_atomic_option(self):
+        path = gate.Path(self.tmp.name) / (gate.digest("session-a") + ".json")
+        previous = {"version": 2, "enabled": ["skill", "subagent"], "turn": "old-turn",
+                    "pending": True, "active": None, "prepared": {"old-spawn": "old-unit"},
+                    "units": {"old-unit": {"result": {"decisions": {
+                        "subagent": {"choice": "child-fast", "confidence": 0.8}}}}}}
+        path.write_text(json.dumps(previous))
+        self.send("SessionStart", source="resume")
+        current = json.loads(path.read_text())
+        self.assertEqual(current["version"], 3)
+        self.assertEqual(current["enabled"], ["skill", "subagent"])
+        self.assertEqual(current["units"], {})
+        self.assertEqual(current["prepared"], {})
+        self.router.assert_not_called()
+
+    def test_live_matrix_bounds_and_extra_host_models(self):
+        self.enable("subagent")
+        self.prompt()
+        spawn = {"task_name": "reader", "message": "Summarize a module", "fork_turns": "none"}
+        original = unit(("subagent",), target="subagent", spawn=spawn)
+        cases = []
+        for values in (["low"] * 2, [str(index) for index in range(17)], [None], "low"):
+            data = copy.deepcopy(original)
+            data["efforts"]["child-fast"] = values
+            cases.append(data)
+        too_many = copy.deepcopy(original)
+        too_many["efforts"].update({"unused-" + str(index): [] for index in range(254)})
+        cases.append(too_many)
+        for data in cases:
+            with self.subTest(data=data), self.assertRaises(gate.GateError) as error:
+                self.begin(data)
+            self.assertEqual(error.exception.code, "invalid_input")
+        self.router.assert_not_called()
+        original["efforts"]["unused-host-model"] = ["low"]
+        self.assertEqual(self.begin(original)["decisions"]["subagent"]["model"], "child-fast")
+        self.router.assert_called_once()
+
+    def test_child_pair_concurrent_duplicate_and_continuation_reuse_one_route(self):
+        self.enable("subagent")
+        self.prompt()
+        spawn = {"task_name": "reader", "message": "Summarize a module", "fork_turns": "none"}
+        data = unit(("subagent",), target="subagent", spawn=spawn)
+        self.router.side_effect = lambda request: (time.sleep(0.1), recommendation(request))[1]
+        results = []
+        threads = [threading.Thread(target=lambda: results.append(self.begin(data))) for _ in range(4)]
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            thread.join(timeout=3)
+        self.assertEqual(len(results), 4)
+        self.assertEqual(sum(not result["cached"] for result in results), 1)
+        for result in results:
+            self.assertEqual(result["decisions"]["subagent"]["model"], "child-fast")
+            self.assertEqual(result["decisions"]["subagent"]["effort"], "low")
+        self.prompt("Continue that same child task", turn="turn-b")
+        continued = copy.deepcopy(data)
+        continued["turn_id"] = "turn-b"
+        self.assertTrue(self.begin(continued)["cached"])
+        self.router.assert_called_once()
+
+    def test_child_pair_http_failure_is_cached_without_fabricated_model_or_effort(self):
+        self.enable("subagent")
+        self.prompt()
+        spawn = {"task_name": "reader", "message": "Summarize a module", "fork_turns": "none",
+                 "model": "child-deep", "reasoning_effort": "high"}
+        data = unit(("subagent",), target="subagent", spawn=spawn)
+        self.router.side_effect = route.RoutingError("http_error")
+        result = self.begin(data)
+        self.assertEqual(result["status"], "fallback")
+        self.assertEqual(result["decisions"], {})
+        self.assertTrue(self.begin(data)["cached"])
+        self.assertEqual(self.send("PreToolUse", tool_name="spawn_agent", tool_input=spawn), {})
+        self.router.assert_called_once()
 
     def test_only_anchored_human_control_enables_routing(self):
         for text in ('Please run jev on', '"jev on"', 'Example: jev on',
@@ -202,7 +350,7 @@ class GateTests(unittest.TestCase):
             spawn = {"task_name": "child_" + str(index), "message": "Read one bounded module",
                      "fork_turns": "none", "model": "child-deep", "reasoning_effort": "high"}
             data = unit(("skill", "subagent"), target="subagent", unit_id="child-" + str(index),
-                        spawn=spawn, efforts={"child-fast": ["low"]})
+                        spawn=spawn, efforts={"child-fast": ["low"], "child-deep": ["high"]})
             children.append((spawn, data))
         def begin_child(data):
             try:
@@ -513,10 +661,10 @@ class GateTests(unittest.TestCase):
         spawn = {"task_name": "reader", "message": "Summarize a bounded module",
                  "fork_turns": "none", "model": "child-deep", "reasoning_effort": "high"}
         data = unit(("skill", "subagent"), target="subagent", unit_id="child-reader",
-                    spawn=spawn, efforts={"child-fast": ["low"]})
+                    spawn=spawn, efforts={"child-fast": ["low"], "child-deep": ["high"]})
         body = {"model": "jev-test", "answers": {
-            "subagent": {"type": "choice", "choice": "child-fast", "confidence": 0.8,
-                         "probabilities": {"child-fast": 0.8, "child-deep": 0.2}},
+            "subagent": {"type": "choice", "choice": "fast-low", "confidence": 0.8,
+                         "probabilities": {"fast-low": 0.8, "deep-high": 0.2}},
             "skill_0": {"type": "choice", "choice": "select", "confidence": 0.8,
                         "probabilities": {"select": 0.8, "skip": 0.2}},
             "skill_1": {"type": "choice", "choice": "select", "confidence": 0.8,

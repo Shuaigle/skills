@@ -18,8 +18,11 @@ function host(options = {}) {
     process: { run: async (argv, init) => {
       calls.processes.push({ argv, init });
       if (options.process) return options.process(argv, init);
+      const candidates = JSON.parse(init.stdin).decisions.subagent;
+      const selected = candidates.find(item => item.model === (options.choice ?? 'haiku'));
       return { exitCode: 0, stderr: '', stdout: JSON.stringify({ status: 'recommended',
-        decisions: { subagent: { choice: options.choice ?? 'haiku', confidence: 0.9 } } }) };
+        decisions: { subagent: { choice: selected.id, model: selected.model, effort: selected.effort,
+          confidence: 0.9 } } }) };
     } },
   };
   register((name, matcher, hook) => {
@@ -117,6 +120,7 @@ test('only explicit human-origin commands can enable or disable routing', async 
 
 test('installed new and old Jev skills reuse the command without conflicting registration', async () => {
   for (const entry of [
+    { name: 'jev', source: 'user', description: 'Jev routing for optional skills and subagent model/effort pairs.' },
     { name: 'jev', source: 'user', description: 'Jev routing for optional skills and subagent models.' },
     { name: 'jev', source: 'user', description: 'Jev routing for task models, skills, and subagent models.' },
     { name: 'jev', source: 'plugin', plugin: 'shuaigle', description: 'Jev' },
@@ -168,6 +172,11 @@ test('combined skill and subagent routing uses one agent-prepared batch without 
   const prompt = await h.event('prompt.submit', { text: 'Continue the child work' });
   assert.match(prompt.context[0], /one combined Jev batch per child unit/);
   assert.match(prompt.context[0], /native hook never reroutes this combined path/);
+  assert.match(prompt.context[0], /report effort-routing unavailable/);
+  assert.match(prompt.context[0], /keep model and skill decisions in that same batch/);
+  assert.match(prompt.context[0], /effort:null means omit Agent.effort and use host-controlled effort/);
+  assert.ok(!prompt.context[0].includes('reuse ordinary fallback for the unit instead of asking Jev'));
+  assert.match(prompt.context[0], /concrete effort is this skill's explicit per-invocation instruction/);
   await h.command('off skill');
   assert.equal(await spawn(h, fallback, 'sonnet'), fallback);
   assert.equal(h.calls.processes.length, 0);
@@ -202,6 +211,79 @@ test('one stable spawn routes once and reuses its choice through repeated dispat
   assert.ok(!call.init.stdin.includes(e.prompt));
 });
 
+test('native candidates are atomic model/default-effort options with opaque IDs', async () => {
+  const h = host(); await h.command('on subagent');
+  const applied = await spawn(h);
+  assert.equal(applied.model, 'haiku'); assert.equal(Object.hasOwn(applied, 'effort'), false);
+  const candidates = JSON.parse(h.calls.processes[0].init.stdin).decisions.subagent;
+  assert.deepEqual(candidates.map(item => item.model), ['sonnet', 'opus', 'haiku']);
+  for (const item of candidates) {
+    assert.deepEqual(Object.keys(item).sort(), ['description', 'effort', 'id', 'model']);
+    assert.notEqual(item.id, item.model); assert.equal(item.effort, null);
+  }
+  assert.ok(h.calls.logs.some(text => text.includes('no verified per-spawn effort control')));
+  assert.ok(h.calls.logs.some(text => text.includes('effort=host-controlled')));
+  const prompt = await h.event('prompt.submit', { text: 'Continue' });
+  assert.match(prompt.context[0], /Native candidates currently use effort:null/);
+  assert.match(prompt.context[0], /environment or organization policy/);
+});
+
+test('a global effort row is not expanded into an unsupported per-model matrix', () => {
+  const candidates = modelCandidates([
+    { key: 'model', kind: 'choice', isLocked: false, value: 'sonnet', options: ['sonnet', 'haiku'] },
+    { key: 'effort', kind: 'choice', isLocked: false, value: 'max', options: ['low', 'max'] },
+  ]);
+  assert.equal(candidates.length, 2);
+  assert.ok(candidates.every(item => item.effort === null));
+});
+
+test('a recommendation cannot substitute a model or effort outside the chosen atomic option', async () => {
+  for (const subagent of [
+    { choice: 'subagent-2', model: 'opus', effort: null, confidence: 0.9 },
+    { choice: 'subagent-2', model: 'haiku', effort: 'low', confidence: 0.9 },
+    { choice: 'haiku', model: 'haiku', effort: null, confidence: 0.9 },
+  ]) {
+    const h = host({ process: async () => ({ exitCode: 0, stderr: '', stdout: JSON.stringify({
+      status: 'recommended', decisions: { subagent } }) }) });
+    await h.command('on subagent'); const e = child();
+    assert.equal(await spawn(h, e, 'sonnet'), e);
+    assert.equal(await spawn(h, e, 'sonnet'), e);
+    assert.equal(h.calls.processes.length, 1);
+  }
+});
+
+test('explicit effort remains unchanged without guessing a compatible model', async () => {
+  const h = host(); await h.command('on subagent');
+  const e = child('explicit-effort', { effort: 'low' });
+  assert.equal(await spawn(h, e, 'sonnet'), e);
+  assert.equal(h.calls.processes.length, 0);
+  assert.ok(h.calls.logs.some(text => text.includes('explicit effort has no verified compatible model inventory')));
+  const prompt = await h.event('prompt.submit', { text: 'Continue with my fixed effort' });
+  assert.match(prompt.context[0], /user fixed effort and compatible models cannot be verified/);
+  assert.match(prompt.context[0], /preserve the original model and that effort, route only optional skills/);
+  assert.match(prompt.context[0], /never replace the user's value with null/);
+  const continuation = child('explicit-effort');
+  assert.equal(await spawn(h, continuation, 'sonnet'), continuation);
+  assert.equal(h.calls.processes.length, 0);
+  await h.command('on skill');
+  const prepared = child('prepared-pair', { model: 'haiku', effort: 'medium' });
+  assert.equal(await spawn(h, prepared), prepared);
+  assert.equal(h.calls.processes.length, 0);
+});
+
+test('combined default-effort preparation preserves model and skills without a second routing call', async () => {
+  const h = host(); await h.command('on');
+  const prepared = child('combined-default', { model: 'haiku', prompt: 'Prepared skills: testing, security' });
+  assert.equal(await spawn(h, prepared), prepared);
+  assert.equal(await spawn(h, { ...prepared }).then(value => value.model), 'haiku');
+  assert.equal(h.calls.processes.length, 0);
+  assert.equal(h.calls.configs, 0);
+  assert.equal(Object.hasOwn(prepared, 'effort'), false);
+  await h.command('off skill');
+  assert.equal((await spawn(h, child('combined-default'))).model, 'haiku');
+  assert.equal(h.calls.processes.length, 0);
+});
+
 test('concurrent dispatches of one spawn share the in-flight routing promise', async () => {
   let resolve;
   const pending = new Promise(done => { resolve = done; });
@@ -210,7 +292,7 @@ test('concurrent dispatches of one spawn share the in-flight routing promise', a
   await new Promise(done => setImmediate(done));
   assert.equal(h.calls.processes.length, 1);
   resolve({ exitCode: 0, stdout: JSON.stringify({ status: 'recommended', decisions: {
-    subagent: { choice: 'haiku', confidence: 0.9 } } }), stderr: '' });
+    subagent: { choice: 'subagent-2', model: 'haiku', effort: null, confidence: 0.9 } } }), stderr: '' });
   assert.equal((await a).model, 'haiku'); assert.equal((await b).model, 'haiku');
 });
 
@@ -226,6 +308,27 @@ test('continuing an existing child has no new spawn routing event', async () => 
   const followup = { tool: 'SendMessage', tool_use_id: 'followup',
     input: { to: 'child-id', message: 'Continue inspecting' } };
   assert.equal(await h.event('tool.call', followup), followup);
+  assert.equal(h.calls.processes.length, 1);
+});
+
+test('native resume events keep the existing pair and never ask Jev again', async () => {
+  const h = host(); await h.command('on subagent'); await spawn(h);
+  const e = child('resume-event', { resume: { agentId: 'child-id' }, model: 'haiku', effort: 'low' });
+  assert.equal(await spawn(h, e), e);
+  assert.equal(h.calls.processes.length, 1); assert.equal(h.calls.configs, 1);
+  assert.ok(h.calls.logs.some(text => text.includes('resumed agent keeps its existing model and effort')));
+});
+
+test('workflow agents with a shared tool ID use host dispatch without merging their independent work', async () => {
+  const h = host(); await h.command('on subagent');
+  for (const agentIndex of [1, 2]) {
+    const e = child('shared-workflow-call', { workflow: { runId: 'wf_test', agentIndex } });
+    assert.equal(await spawn(h, e, 'sonnet'), e);
+  }
+  assert.equal(h.calls.processes.length, 0); assert.equal(h.calls.configs, 0);
+  assert.ok(h.calls.logs.some(text => text.includes('no safe independent unit/cache identification yet')));
+  assert.ok(!h.calls.logs.some(text => text.includes('immutable')));
+  assert.equal((await spawn(h, child('shared-workflow-call'))).model, 'haiku');
   assert.equal(h.calls.processes.length, 1);
 });
 
@@ -308,7 +411,7 @@ test('live inventory filters virtual modes, context suffixes, duplicates and pri
   const candidates = modelCandidates([{ key: 'model', kind: 'choice', isLocked: false,
     options: ['default', 'sonnet', 'opus', 'haiku', 'fable', 'best', 'opusplan', 'sonnet[1m]',
       'claude-opus-test', 'arn:aws:private', '/private/model', 'custom/name', 'sonnet'] }]);
-  assert.deepEqual(candidates.map(item => item.id), ['sonnet', 'opus', 'haiku', 'fable', 'claude-opus-test']);
+  assert.deepEqual(candidates.map(item => item.model), ['sonnet', 'opus', 'haiku', 'fable', 'claude-opus-test']);
   assert.deepEqual(modelCandidates([{ key: 'model', kind: 'choice', isLocked: true, options: ['sonnet'] }]), []);
   assert.deepEqual(modelCandidates([{ key: 'model', kind: 'text', options: ['sonnet'] }]), []);
 });
@@ -322,7 +425,7 @@ test('locked, absent or restricted inventory falls back without API and is not r
     assert.ok(h.calls.logs.some(text => /unavailable|locked/.test(text)));
   }
   const h = host({ settings: { availableModels: ['haiku'] } }); await h.command('on subagent'); await spawn(h);
-  assert.deepEqual(JSON.parse(h.calls.processes[0].init.stdin).decisions.subagent.map(item => item.id), ['haiku']);
+  assert.deepEqual(JSON.parse(h.calls.processes[0].init.stdin).decisions.subagent.map(item => item.model), ['haiku']);
 });
 
 test('each independent spawn reads fresh candidates without rerouting earlier units', async () => {
@@ -330,7 +433,7 @@ test('each independent spawn reads fresh candidates without rerouting earlier un
   h.rows([{ key: 'model', kind: 'choice', isLocked: false, options: ['haiku'] }]);
   await spawn(h, child('two')); await spawn(h, child('one'));
   assert.equal(h.calls.configs, 2);
-  assert.deepEqual(JSON.parse(h.calls.processes[1].init.stdin).decisions.subagent.map(item => item.id), ['haiku']);
+  assert.deepEqual(JSON.parse(h.calls.processes[1].init.stdin).decisions.subagent.map(item => item.model), ['haiku']);
 });
 
 test('feature summaries contain no source text, code, secret values or private paths', () => {

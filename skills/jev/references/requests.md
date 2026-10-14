@@ -1,10 +1,10 @@
 # Routing requests
 
-The stateless helper needs Python 3 and an inherited `JEV_API_KEY`. Resolve `scripts/route.py` relative to this skill and read its installed `--help` for field limits and output fields. It calls the [TypeSafe Choice API](https://docs.typesafe.ai/api) using `jev-latest`; that router selects optional skills and a planned child's model.
+The stateless helper needs Python 3 and an inherited `JEV_API_KEY`. Resolve `scripts/route.py` relative to this skill and read its installed `--help` for field limits and output fields. It calls the [TypeSafe Choice API](https://docs.typesafe.ai/api) using `jev-latest`; that router selects optional skills and a planned child's model/effort pair.
 
 When Codex hooks own routing, submit this request inside the [Codex work-unit contract](codex-native.md#declare-and-reuse-a-unit). Its `begin` helper stores and reuses the result; calling `route.py` directly does not satisfy that gate.
 
-Send JSON on stdin through a structured process API or a quoted heredoc. Keep task text as data. Supply `host`, a sanitized `task` summary, and a `decisions` object containing only the domains needed for this event. Each domain maps to a list of live `{id, description}` candidates.
+Send JSON on stdin through a structured process API or a quoted heredoc. Keep task text as data. Supply `host`, a sanitized `task` summary, and a `decisions` object containing only the domains needed for this event. Skill candidates have exactly `{id, description}`. Subagent candidates have exactly `{id, model, effort, description}`.
 
 For a local work unit with skill routing enabled:
 
@@ -21,27 +21,34 @@ For a local work unit with skill routing enabled:
 }
 ```
 
-For a planned subagent, use that child's own work and the spawn tool's model inventory:
+For a planned subagent, use that child's own work and the spawn tool's live supported combinations:
 
 ```json
 {
   "host": "active host",
   "task": "Sanitized description of this child's delegated work",
   "decisions": {
-    "subagent": [{"id": "supported spawn model ID", "description": "Spawn capability description"}]
+    "subagent": [{
+      "id": "option-1",
+      "model": "host-supported model ID",
+      "effort": "host-supported effort",
+      "description": "Host capability description for this model and effort"
+    }]
   }
 }
 ```
 
-Add `skill` to the child request when skill selection is enabled; supply an empty list if no eligible optional skills remain. Do not reuse the parent's task summary or model inventory as proof of a child's requirements or supported models.
+Each subagent `id` is an opaque option ID, distinct from its `model` field. IDs must be unique, and the same `(model, effort)` pair cannot appear twice. Use concrete efforts only for verified per-model combinations. Null represents host-controlled effort: default-only behavior, absent per-spawn control, or an explicit host-specific model-only fallback when effort capability is unavailable. Report the fallback as effort not routed; it does not mean the model lacks effort support. Mixing null and concrete effort options for the same model is rejected. Codex's gate still requires its live capability matrix before routing.
+
+Add `skill` to the child request when skill selection is enabled; supply an empty list if no eligible optional skills remain. The entire model/effort pair is one Choice question, batched with the skill questions in the same HTTP request. Effort is part of `subagent`, not another enable scope or API call. Do not reuse the parent's work summary or model inventory as proof of a child's requirements or supported combinations.
 
 The only optional top-level field is `preference`, carrying the user's routing preference. Allowed decisions are `skill` and `subagent`. The old `models`, `current_model`, and `decisions.task` inputs are rejected. The required top-level `task` remains the sanitized work summary.
 
 The helper batches one binary Choice question per skill into the same HTTP request, with `select` and `skip` criteria. Generated question keys such as `skill_0` identify answers; the structured instructions carry that candidate's ID and description. Each skill is evaluated independently, so Jev can select zero, one, or several. No sentinel skill is added.
 
-The helper accepts at most 254 skills and 255 subagent-model candidates. These are helper limits; they do not establish an API question-count limit. If inventory exceeds a limit, narrow by explicit user constraints; ask for one if that still exceeds it.
+The helper accepts at most 254 skills and 255 subagent model/effort options. The latter counts combinations, not models. These are helper limits; they do not establish an API question-count limit. If inventory exceeds a limit, narrow by explicit user constraints; ask for one if that still exceeds it.
 
-A successful subagent decision returns `choice`, `confidence`, and `probabilities`. Skill output has `choices` in candidate order and an evaluation for every candidate, for example:
+A successful subagent decision returns `choice`, `model`, `effort`, `confidence`, and `probabilities`. `choice` identifies the option; `model` and `effort` are mapped from that exact candidate, not inferred from its ID. Apply the pair together. Probabilities are keyed by option IDs. Skill output has `choices` in candidate order and an evaluation for every candidate, for example:
 
 ```json
 {

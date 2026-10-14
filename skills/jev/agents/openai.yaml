@@ -1,5 +1,5 @@
 interface:
   display_name: "Jev"
-  short_description: "Manually enable Jev skill and subagent model routing"
+  short_description: "Manually route skills and subagent model/effort pairs with Jev"
 policy:
   allow_implicit_invocation: false
