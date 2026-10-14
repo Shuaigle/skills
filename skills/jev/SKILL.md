@@ -8,13 +8,15 @@ disable-model-invocation: true
 
 Start Jev only through an explicit human invocation or Jev control command. After the user enables decisions, continue their routing in this conversation under that authorization. Agents and other skills cannot invoke Jev or enable its decisions on their own.
 
-Let Jev choose a task model, zero or more optional skills, or a subagent model from live candidates. Enable each decision independently; the host applies the choices.
+Let Jev choose a task model, zero or more optional skills, or a subagent model from live candidates. Enable each decision independently; reuse each independent work unit's decisions through its batch and continuations.
 
-In Claude Code with this plugin's native mod loaded, read [native routing](references/claude-native.md). Its `/jev` commands own the flags; it applies task and subagent models automatically to the same conversation's requests. Follow the emitted native context and route only optional skills here, without repeating model decisions or waiting for manual model switches. Other hosts retain the workflow below.
+In Codex with this plugin's hooks loaded, read [Codex routing](references/codex-native.md). Human commands own the flags; before work tools, declare each independent unit through the emitted `begin` command. It caches the routing result and applies prepared child-model choices. A main-model recommendation still needs the host's switching capability. Use the hook's state instead of a second skill-only state.
+
+In Claude Code with this plugin's native mod loaded, read [Claude routing](references/claude-native.md). Its `/jev` commands own the flags; it applies task and subagent models automatically to the same conversation's requests. Follow the emitted native context and route only optional skills here, without repeating model decisions or waiting for manual model switches. Other hosts retain the workflow below.
 
 ## Control
 
-Keep an `enabled_decisions` set, routing preferences, and pending choices in this conversation. Valid decisions are `task`, `skill`, and `subagent`. A new conversation starts with all three **off**. Runtime routing writes no global settings, hooks, or state files.
+Keep an `enabled_decisions` set, routing preferences, and pending choices in this conversation. Valid decisions are `task`, `skill`, and `subagent`. A new conversation starts with all three **off**. Codex hooks keep a private conversation cache; other paths keep runtime state in memory. Routing leaves global model defaults unchanged.
 
 | Request | Action | Done when |
 |---|---|---|
@@ -24,15 +26,15 @@ Keep an `enabled_decisions` set, routing preferences, and pending choices in thi
 
 For example, `jev on skill subagent` enables those two without changing `task`; `jev off task` disables only task-model routing. An explicit request to use **only** named decisions replaces the set. Configuration requests are not new tasks.
 
-Apply `task` and `skill` at each new user task. Apply `subagent` immediately before each otherwise-planned spawn, using that child's work. Follow-ups, clarification answers, and resuming a pending task reuse its choices; reroute when its scope changes or the user requests it. Explicit user model or skill choices and mandatory workflows take precedence for their respective decision. Other enabled decisions still apply.
+Apply `task` and `skill` once per independent local work unit. Apply `subagent` and any enabled `skill` selection once per planned child's work. Ten file reads and their summary can be one unit; editing or verifying a different goal starts another. Reuse decisions for repeated reads, follow-ups, clarifications, and resuming the same unit. Changed goals, candidates, preferences, or enabled decisions need a new unit. Explicit user model or skill choices and mandatory workflows take precedence for their respective decision. Other enabled decisions still apply.
 
-An off decision follows normal host behavior. Enabling `subagent` selects models for planned agents; it does not create agents, choose their number, or expand their permissions. A skill runs after turn dispatch and cannot guarantee pre-turn interception; a strict guarantee requires host-side integration.
+An off decision follows normal host behavior. Enabling `subagent` selects models for planned agents; it does not create agents, choose their number, or expand their permissions. A skill alone relies on the agent following these steps. Codex hooks guard covered work-tool paths; the agent still defines the semantic boundaries between units.
 
 ## Route
 
-1. **Scope.** Identify the event and its enabled decisions. At a user task, consider `task` and `skill`; at a planned spawn, consider `subagent` and any enabled skill selection for that child's work. Skip decisions already fixed by explicit instructions. If none remain, use normal host behavior without calling Jev. Done when each requested decision has a target and a task summary.
+1. **Scope.** Identify the independent unit and its enabled decisions. For local work, consider `task` and `skill`; at a planned spawn, consider `subagent` and any enabled skill selection for that child's work. Reuse an existing unit's choices; skip decisions fixed by explicit instructions. If none remain, use normal host behavior without calling Jev. Done when each requested decision has a target and a bounded work summary.
 2. **Inventory.** Read [candidate and host guidance](references/hosts.md). Obtain live IDs and descriptions separately for each domain: this conversation's models, implicitly invocable skills, or models accepted by the planned spawn tool. Exclude Jev itself from skill candidates. Request missing task-model inventory from the user's picker; for unavailable skill or spawn inventory, report the limit and use ordinary selection or inheritance. Done when every supplied candidate is verified for its own domain.
-3. **Ask.** Prepare stdin using [request guidance](references/requests.md). Batch decisions about the same work in one call; a child's summary gets a separate request when that spawn is planned. Include only enabled, applicable domains. Send a sanitized summary of complexity, modalities, and preferences plus candidate descriptions; no credentials, private paths, repository content, or conversation history. Done when every requested answer validates or the helper returns an explicit error.
+3. **Ask.** Prepare stdin using [request guidance](references/requests.md), or the Codex `begin` contract when hooks own routing. Batch decisions about the same work in one call; a child's summary gets a separate request when that spawn is planned. Include only enabled, applicable domains. Send a sanitized summary of complexity, modalities, and preferences plus candidate descriptions; no credentials, private paths, repository content, or conversation history. Done when every requested answer validates or the helper returns an explicit error.
 4. **Apply.** Apply the branches below. Store choices with the pending task; apply its task model before executing its selected skills. Confirm model application through host metadata or the user, and report each applied choice once. Done when the task or spawn proceeds with confirmed choices, ordinary fallback, or a visible pending manual switch.
 
 On a missing key, timeout, HTTP failure, or invalid response, apply none of that batch's answers. Report the failed decisions and use the current task model, ordinary skill workflow, or inherited child model unless the user required successful routing. Preserve the enabled set. A recommendation alone is not a completed switch or invocation.

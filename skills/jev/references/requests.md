@@ -2,6 +2,8 @@
 
 The stateless helper needs Python 3 and an inherited `JEV_API_KEY`. Resolve `scripts/route.py` relative to this skill and read its installed `--help` for field limits and output fields. It calls the [TypeSafe Choice API](https://docs.typesafe.ai/api) using `jev-latest`; Jev's model is distinct from the host model it chooses.
 
+When Codex hooks own routing, submit this request inside the [Codex work-unit contract](codex-native.md#declare-and-reuse-a-unit). Its `begin` helper stores and reuses the result; calling `route.py` directly does not satisfy that gate.
+
 Send JSON on stdin through a structured process API or a quoted heredoc. Keep task text as data. Supply `host`, a sanitized `task` summary, and a `decisions` object containing only the domains needed for this event. Each domain maps to a list of live `{id, description}` candidates.
 
 For a new user task with task-model and skill routing enabled:

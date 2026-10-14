@@ -12,6 +12,8 @@ A skill choice is permission to apply an eligible workflow within the existing t
 
 ## Codex
 
+When the Codex plugin hooks are loaded and trusted, use [Codex routing](codex-native.md) for human controls, unit declarations, decision reuse, and prepared subagent spawns. Symlinking this skill alone does not install hooks. Hook output has no documented main-model override; use the switching capabilities below for a pending task-model choice.
+
 Prefer model metadata supplied for the current host and conversation. A client that already controls the conversation through [Codex app-server](https://learn.chatgpt.com/docs/app-server) can call `model/list`; consume every `nextCursor` and retain only selectable models. Include descriptions and required capabilities; keep reasoning effort compatible with the chosen model.
 
 In Codex CLI, inspect the installed `codex debug models --help`, then use `codex debug models` if supported. Inspect its current schema and visibility/availability fields before constructing candidates. `--bundled` skips refresh, so it is unsuitable as proof of current availability. A different CLI installation's catalog does not establish the Desktop conversation's choices. If the active host exposes no inventory, ask the user for the current model picker's selectable rows.

@@ -19,6 +19,15 @@ Claude Code plugin（自動更新）：
 /plugin install shuaigle@shuaigle
 ```
 
+Codex plugin（含 Jev hooks；從本 repo 安裝）：
+
+```bash
+codex plugin marketplace add ./
+codex plugin add shuaigle@shuaigle
+```
+
+這組指令已確認 Codex CLI `0.162.1` 支援。安裝後在 `/hooks` 檢查定義，由使用者批准 hook trust，再手動啟用 Jev。symlink／skills.sh 只安裝 skill；Codex plugin 的 hooks 見 [Codex 路由](./skills/jev/references/codex-native.md)。
+
 開發模式（symlink 進 `~/.claude/skills` 與 `~/.agents/skills`，`git pull` 即更新）：
 
 ```bash
@@ -47,13 +56,15 @@ cd skills && ./scripts/link-skills.sh
 | [codebase-design](./skills/codebase-design/SKILL.md) | model | Deep module 詞彙與原則：小介面隱藏大量行為，並選定清楚的 seam |
 | [handoff](./skills/handoff/SKILL.md) | user | 把對話壓縮成交接文檔給下一個 agent |
 | [writing-great-skills](./skills/writing-great-skills/SKILL.md) | user | 寫與改 skill 的參考：invocation 取捨、資訊層級、環境真相、剪枝、leading words、失效模式 |
-| [jev](./skills/jev/SKILL.md) | user | 使用者啟用後，在目前對話獨立路由任務模型、零到多個 skills 與 subagent 模型；Claude 原生 mod 自動路由當前請求，Codex Desktop 可自動設定下一回合模型 |
+| [jev](./skills/jev/SKILL.md) | user | 使用者啟用後，在目前對話路由任務模型、零到多個 skills 與 subagent 模型；Codex hooks 每個獨立子任務只問一次並重用決策，Claude 原生 mod 路由當前請求 |
 
 觸發欄：user = 打名字才會動；model = agent 自行判斷時機，也可手動。
 
-`jev` 只能由使用者明確呼叫或啟用；啟用的決策會在目前對話自動執行。它有三個獨立選項：`task` 決定主對話模型、`skill` 可不選或選一到多個可自動呼叫的 skills、`subagent` 在每次預定派工前決定該子任務的模型。`jev on` 維持只開啟 `task`；`jev on skill subagent` 累加這兩項，`jev off task` 只關閉主模型決策，`jev on all` 全開，`jev off` 全關，`jev status` 列出三項狀態。新對話預設全關。Claude Code plugin 用 `/shuaigle:jev on skill subagent`，裸 skill 用 `/jev on skill subagent`，Codex 用 `$jev on skill subagent`。
+`jev` 只能由使用者明確呼叫或啟用；啟用的決策會在目前對話自動執行。它有三個獨立選項：`task` 決定主對話模型、`skill` 可不選或選一到多個可自動呼叫的 skills、`subagent` 在預定派工前決定該子任務的模型。`jev on` 只開啟 `task`；`jev on skill subagent` 累加這兩項，`jev off task` 只關閉主模型決策，`jev on all` 全開，`jev off` 全關，`jev status` 列出三項狀態。新對話預設全關。Claude Code plugin 用 `/shuaigle:jev on skill subagent`，裸 skill 用 `/jev on skill subagent`，Codex skill 用 `$jev on skill subagent`；Codex hooks 建議用人類訊息第一行的 `jev on skill subagent`。
 
-同一任務的決策合併送出；subagent 使用自己的子任務摘要與 spawn 工具支援的模型清單。只傳摘要與去除私人資訊的候選描述。使用者明確指定的模型、skill，以及手動限定 skill 的政策優先；開啟 subagent 決策不會額外建立 agent。Codex Desktop 的 Jev 切換會設定原對話的下一回合模型，不能改已執行中的回合；須用 turn metadata 確認實際套用。需要在目前回合開始前換模型時，宿主需提供可控制該回合的 app-server 整合。其他沒有同對話切換介面的宿主，回報推薦並依原對話手動切換流程處理。
+每個獨立子任務把啟用的決策合併問一次，後續讀檔與追問重用結果；例如十個相關檔案的讀取與摘要算一個子任務。目標、候選或偏好改變時建立新子任務。subagent 使用自己的摘要與 spawn 工具支援的模型清單。只傳摘要與去除私人資訊的候選描述。使用者指定的模型、skill，以及手動限定 skill 的政策優先；開啟 subagent 決策不會額外建立 agent。批次讀檔適合以精簡上下文交給 Jev 選出的子模型，短讀取可直接留在主對話。
+
+Codex hooks 在涵蓋的工具路徑上要求先取得子任務決策，並把已準備的 spawn 改為 Jev 選出的模型。快取保留目前對話的旗標、雜湊與最小決策，不保存金鑰、原始任務或 child brief；路由失敗也會重用該次 fallback。resume／compact 保留狀態，新的、fork 或 clear 對話重設全關。hooks 無法辨識所有語意上的任務邊界，特殊工具是否涵蓋取決於宿主，需在實際宿主確認。主對話推薦仍需宿主套用：Codex Desktop 只能設定原對話的下一回合模型，不能改已執行中的回合；須用 turn metadata 確認。需要控制下一回合開始時的模型，宿主可透過其擁有的 app-server 連線指定。其他沒有同對話切換介面的宿主回報推薦，讓使用者在原對話切換。
 
 Claude 原生 mod 載入後，由使用者輸入 `/jev on task` 或 `/jev on subagent` 啟用自動模型路由；`/jev on all` 全開。它在實際請求送出前套用 Jev 的選擇，不必逐次手動確認，也不會另開對話。`/jev status` 區分推薦模型與宿主回報的實際模型；`/model` 的預設選項可以保持原值。原生路徑只把本地萃取的任務類型、複雜度等特徵交給 Jev，不傳完整 prompt。使用者啟用 `skill` 後，agent 依已啟用的 Jev 流程選擇 skills；runtime 旗標只存在記憶體，mod 重載或 session 結束即重設。
 

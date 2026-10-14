@@ -1,5 +1,5 @@
 interface:
   display_name: "Jev"
-  short_description: "Manually enable Jev model and optional skill routing"
+  short_description: "Manually enable Jev routing with reusable work-unit decisions"
 policy:
   allow_implicit_invocation: false
