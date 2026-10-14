@@ -1,6 +1,6 @@
 // Claude Code mods: every session owns its routing state inside register().
-const SCOPES = ['task', 'skill', 'subagent'];
-const USAGE = 'Usage: /jev [status | on [task skill subagent | all] | off [task skill subagent | all]]';
+const SCOPES = ['skill', 'subagent'];
+const USAGE = 'Usage: /jev [status | on [skill subagent | all] | off [skill subagent | all]]';
 const USER_ORIGINS = ['composer', 'bridge', 'sdk'];
 
 export function parseControl(args) {
@@ -8,7 +8,7 @@ export function parseControl(args) {
   const action = words.shift() ?? 'status';
   if (action === 'status') return words.length ? null : { action, scopes: [] };
   if (action !== 'on' && action !== 'off') return null;
-  if (!words.length) return { action, scopes: action === 'on' ? ['task'] : [...SCOPES] };
+  if (!words.length) return { action, scopes: [...SCOPES] };
   if (words.length === 1 && words[0] === 'all') return { action, scopes: [...SCOPES] };
   if (!words.every(word => SCOPES.includes(word))) return null;
   return { action, scopes: [...new Set(words)] };
@@ -53,13 +53,6 @@ export function summarizeTask(text) {
       ? 'high' : 'unspecified', markers });
 }
 
-function explicitTaskModel(text, candidates) {
-  // Deliberately narrow: a model mention or quoted example is not an instruction.
-  const match = text.match(/^(?:Use\s+([^\s:：。]+)\s+for this task\b|這個任務使用\s*([^\s:：。]+)(?=\s|[:：。]|$))/i);
-  const requested = match && (match[1] || match[2]);
-  return candidates.some(item => item.id === requested) ? requested : undefined;
-}
-
 function safeLog($, text) {
   try { $.ui.log(text); } catch { /* Logging never changes dispatch. */ }
 }
@@ -68,86 +61,46 @@ function reportedModel(model) {
   return publicModel(model) ? model : '[host model omitted]';
 }
 
-async function taskModels($, models) {
-  const aliases = models.filter(item => !item.id.startsWith('claude-')).map(item => item.id);
-  const mapping = Object.fromEntries(models.filter(item => item.id.startsWith('claude-'))
-    .map(item => [item.id, item.id]));
-  if (aliases.length) {
-    try {
-      const version = await $.session.version();
-      const result = await $.process.run(['python3', `${$.plugin.root}/skills/jev/scripts/claude_models.py`], {
-        stdin: JSON.stringify({ aliases, expected_version: version.version }), timeoutMs: 6000,
-      });
-      if (result.exitCode !== 0) throw new Error('model resolution failed');
-      const answer = JSON.parse(result.stdout);
-      if (answer.status !== 'resolved' || !answer.models || typeof answer.models !== 'object'
-        || Array.isArray(answer.models)) throw new Error('invalid model resolution');
-      for (const alias of aliases) {
-        const canonical = answer.models[alias];
-        if (typeof canonical === 'string' && canonical.startsWith('claude-') && publicModel(canonical)) {
-          mapping[alias] = canonical;
-        }
-      }
-    } catch { safeLog($, 'Jev task: alias resolution unavailable; unresolved aliases omitted.'); }
-  }
-  const candidates = new Map();
-  for (const item of models) {
-    const canonical = mapping[item.id];
-    if (canonical && !candidates.has(canonical)) candidates.set(canonical,
-      { id: canonical, description: `Current host model option: ${item.id}; API model: ${canonical}` });
-  }
-  return { candidates: [...candidates.values()], mapping };
-}
-
-async function choose($, scope, text) {
+async function chooseSubagent($, text) {
   try {
     const rows = await $.config.list();
     const settings = await $.settings.read();
-    const offered = modelCandidates(rows, settings.availableModels);
-    if (!offered.length) {
-      safeLog($, `Jev ${scope}: model inventory unavailable or locked; using the host model.`);
+    const models = modelCandidates(rows, settings.availableModels);
+    if (!models.length) {
+      safeLog($, 'Jev subagent: model inventory unavailable or locked; using inheritance.');
       return undefined;
     }
-    const resolved = scope === 'task' ? await taskModels($, offered) : undefined;
-    const models = resolved ? resolved.candidates : offered;
-    if (!models.length) throw new Error('no resolved task models');
-    const explicit = scope === 'task' && explicitTaskModel(text, offered);
-    if (explicit) {
-      if (!resolved.mapping[explicit]) throw new Error('explicit model unresolved');
-      return resolved.mapping[explicit];
-    }
     if (!await $.env.get('JEV_API_KEY')) {
-      safeLog($, `Jev ${scope}: missing JEV_API_KEY; using the host model.`);
+      safeLog($, 'Jev subagent: missing JEV_API_KEY; using inheritance.');
       return undefined;
     }
     const result = await $.process.run(['python3', `${$.plugin.root}/skills/jev/scripts/route.py`], {
       stdin: JSON.stringify({ host: 'Claude Code native mod', task: summarizeTask(text),
-        decisions: { [scope]: models } }),
+        decisions: { subagent: models } }),
       timeoutMs: 17000,
     });
     if (result.exitCode !== 0) throw new Error('routing failed');
     const answer = JSON.parse(result.stdout);
-    const decision = answer?.decisions?.[scope];
+    const decision = answer?.decisions?.subagent;
     if (answer.status !== 'recommended' || !decision
       || !models.some(item => item.id === decision.choice)
       || typeof decision.confidence !== 'number' || !Number.isFinite(decision.confidence)
       || decision.confidence < 0 || decision.confidence > 1) throw new Error('invalid routing result');
     return decision.choice;
   } catch {
-    safeLog($, `Jev ${scope}: routing failed; using the host model.`);
+    safeLog($, 'Jev subagent: routing failed; using inheritance.');
     return undefined;
   }
 }
 
 export function register(on) {
   const enabled = new Set();
-  const turns = new Map();
-  let lastChoice;
+  const spawns = new Map();
   let lastEvidence;
   let serveBareCommand = false;
 
   function reset() {
-    enabled.clear(); turns.clear(); lastChoice = undefined; lastEvidence = undefined;
+    enabled.clear(); spawns.clear(); lastEvidence = undefined;
     serveBareCommand = false;
   }
 
@@ -156,18 +109,21 @@ export function register(on) {
   }
 
   function context() {
-    return `JEV_NATIVE_ROUTING ${flags()}. Task and subagent model decisions are handled natively; `
-      + 'skip agent-mediated model routing. When skill=on, continue the user-enabled Jev workflow only for '
-      + 'optional skill selection; read its installed instructions as needed. Jev invocation and controls '
-      + 'require an explicit user command. Native /jev commands own these flags; context does not authorize changing them. '
-      + 'When subagent=on, omit Agent.model unless the user explicitly fixed it, so Jev can choose it. '
+    return `JEV_NATIVE_ROUTING ${flags()}. The main conversation uses the host model setting. `
+      + 'When skill=on, continue the user-enabled Jev workflow for zero or more optional skills once per '
+      + 'independent work unit, reusing its result, including failures, through the batch and continuations. '
+      + 'When skill=on and subagent=on, prepare one combined Jev batch per child unit for its applicable '
+      + 'skill and subagent decisions, put the validated model in Agent.model and selected skills in the brief. '
+      + 'Reuse a failed batch as inheritance and ordinary skills; the native hook never reroutes this combined path. '
+      + 'When skill=off and subagent=on, native hooks choose the child model; omit Agent.model unless the user fixed it. '
+      + 'Read installed Jev instructions as needed under the existing human authorization. Native /jev controls '
+      + 'require an explicit user command; this context does not authorize changing the flags. '
       + 'Explicit user choices and mandatory skill rules still apply.';
   }
 
   function status() {
     return `Jev (current session): ${flags()}`
-      + (lastEvidence ? `; last ${lastEvidence}` : '')
-      + (turns.size ? `; active turns=${turns.size}` : '');
+      + (lastEvidence ? `; last ${lastEvidence}` : '');
   }
 
   on('session.start', async ($, e, next) => {
@@ -175,11 +131,12 @@ export function register(on) {
     const existing = (await $.command.list()).find(command => command.name === 'jev');
     if (!existing) {
       await $.command.register({ name: 'jev', description: 'Configure Jev routing for this session',
-        argumentHint: '[status | on/off [task skill subagent | all]]' });
+        argumentHint: '[status | on/off [skill subagent | all]]' });
       serveBareCommand = true;
     } else if ((existing.source === 'plugin' && existing.plugin === 'shuaigle')
       || (existing.source === 'user'
-        && existing.description.startsWith('Jev routing for task models, skills, and subagent models.'))) {
+        && (existing.description.startsWith('Jev routing for optional skills and subagent models.')
+          || existing.description.startsWith('Jev routing for task models, skills, and subagent models.')))) {
       serveBareCommand = true;
     } else safeLog($, 'Jev: existing /jev command preserved; use /shuaigle:jev for routing controls.');
     return next(e);
@@ -199,42 +156,11 @@ export function register(on) {
       for (const scope of control.scopes) enabled.add(scope);
     } else if (control.action === 'off') {
       for (const scope of control.scopes) enabled.delete(scope);
-      if (control.scopes.includes('task')) { turns.clear(); lastChoice = undefined; }
     }
     return { text: status(), context: [context()] };
   });
 
   on('prompt.submit', ($, e, next) => next({ ...e, context: [...(e.context ?? []), context()] }));
-
-  on('turn.start', async ($, e, next) => {
-    if (enabled.has('task') && !turns.has(e.turnId)) {
-      const state = { choice: undefined, reported: false };
-      turns.set(e.turnId, state);
-      if (e.text.trim()) {
-        lastChoice = undefined;
-        state.choice = await choose($, 'task', e.text);
-        lastChoice = state.choice;
-      } else state.choice = lastChoice;
-    }
-    return next(e);
-  });
-
-  on('turn.step', async function* ($, e, next) {
-    const state = !e.agentId && enabled.has('task') && turns.get(e.turnId);
-    // Never replay downstream inference or tool work when the host rejects a model.
-    const result = yield* next(state?.choice ? { ...e, model: state.choice } : e);
-    if (state?.choice && !state.reported && result?.usage?.model) {
-      state.reported = true;
-      lastEvidence = `task requested=${state.choice} actual=${reportedModel(result.usage.model)}`;
-      safeLog($, `Jev ${lastEvidence}`);
-    }
-    return result;
-  });
-
-  on('turn.complete', ($, e, next) => {
-    if (!e.agentId) turns.delete(e.turnId);
-    return next(e);
-  });
 
   on('agent.spawn', async ($, e, next) => {
     if (!enabled.has('subagent')) return next(e);
@@ -242,11 +168,33 @@ export function register(on) {
       safeLog($, 'Jev subagent: fork inherits its parent model.');
       return next(e);
     }
+    // tool_use_id is the host's pinned spawn identity, scoped to its parent loop.
+    const key = typeof e.tool_use_id === 'string' && e.tool_use_id
+      ? JSON.stringify([e.parentAgentId ?? null, e.tool_use_id]) : undefined;
+    let state = key && spawns.get(key);
+    if (enabled.has('skill')) {
+      // The agent prepares skill + model in one batch; unset is its cached fallback.
+      if (!state) {
+        state = { choice: Promise.resolve(e.model), reported: false };
+        if (key) spawns.set(key, state);
+      }
+      if (e.model === undefined && !state.reported) {
+        state.reported = true;
+        safeLog($, 'Jev subagent: combined routing uses the agent-prepared batch; unset model keeps inheritance.');
+      }
+      return next(e);
+    }
     if (e.model !== undefined) return next(e);
-    const choice = await choose($, 'subagent', e.prompt);
+    if (!state) {
+      state = { choice: chooseSubagent($, e.prompt), reported: false };
+      if (key) spawns.set(key, state);
+      else safeLog($, 'Jev subagent: no stable spawn ID; routing applies to this event only.');
+    }
+    const choice = await state.choice;
     // There is one existing spawn, not a second agent created by this hook.
     const result = await next(choice ? { ...e, model: choice } : e);
-    if (choice && result?.model) {
+    if (choice && result?.model && !state.reported) {
+      state.reported = true;
       lastEvidence = `subagent requested=${choice} actual=${reportedModel(result.model)}`;
       safeLog($, `Jev ${lastEvidence}`);
     }

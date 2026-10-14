@@ -23,10 +23,8 @@ def hook(name, session="session-a", **fields):
     return {"hook_event_name": name, "session_id": session, **fields}
 
 
-def unit(scopes=("task",), **fields):
+def unit(scopes=("skill",), **fields):
     inventories = {
-        "task": [{"id": "fast", "description": "Fast for a bounded task"},
-                 {"id": "deep", "description": "Deeper reasoning"}],
         "skill": [{"id": "testing", "description": "Write behavioral tests"},
                   {"id": "docs", "description": "Write documentation"}],
         "subagent": [{"id": "child-fast", "description": "Fast child"},
@@ -66,7 +64,7 @@ class GateTests(unittest.TestCase):
     def send(self, name, session="session-a", **fields):
         return gate.handle_hook(hook(name, session, **fields), self.tmp.name)
 
-    def enable(self, scopes="task"):
+    def enable(self, scopes="skill"):
         return self.send("UserPromptSubmit", prompt="jev on " + scopes, turn_id="control")
 
     def prompt(self, text="Read the configuration", turn="turn-a"):
@@ -78,6 +76,89 @@ class GateTests(unittest.TestCase):
     def read(self, **fields):
         return self.send("PreToolUse", tool_name="Read",
                          tool_input={"file_path": "config.json"}, **fields)
+
+    def test_bare_on_and_all_enable_only_skill_and_subagent(self):
+        for command in ("jev on", "jev on all"):
+            with self.subTest(command=command):
+                self.send("SessionStart", source="startup")
+                self.send("UserPromptSubmit", prompt=command, turn_id="control")
+                self.prompt()
+                self.begin(unit(("skill",)))
+                spawn = {"task_name": "reader", "message": "Summarize a bounded module",
+                         "fork_turns": "none"}
+                self.begin(unit(("skill", "subagent"), target="subagent", unit_id="child-reader",
+                                spawn=spawn))
+                result = self.send("UserPromptSubmit", prompt="jev status", turn_id="status")
+                context = result["hookSpecificOutput"]["additionalContext"]
+                self.assertIn('"enabled":["skill","subagent"]', context)
+                self.assertNotIn('"task"', context)
+
+    def test_task_controls_are_invalid_and_leave_flags_unchanged(self):
+        self.enable("skill")
+        for command in ("jev on task", "jev off task", "jev on task subagent"):
+            result = self.send("UserPromptSubmit", prompt=command, turn_id="control")
+            context = result["hookSpecificOutput"]["additionalContext"]
+            self.assertIn("Invalid control", context)
+            self.assertIn('"enabled":["skill"]', context)
+        self.router.assert_not_called()
+
+    def test_legacy_main_model_requests_fail_before_route_instead_of_fallback(self):
+        self.enable("skill")
+        self.prompt()
+        values = [unit(("skill",)) for _ in range(3)]
+        values[0]["request"]["current_model"] = "fast"
+        values[1]["request"]["models"] = [{"id": "fast", "description": "Fast model"}]
+        values[2]["request"]["decisions"]["task"] = [{"id": "fast", "description": "Fast model"}]
+        for data in values:
+            with self.assertRaises(gate.GateError) as error:
+                self.begin(data)
+            self.assertEqual(error.exception.code, "invalid_input")
+        self.router.assert_not_called()
+
+    def test_v1_state_preserves_only_previously_authorized_current_scopes(self):
+        path = gate.Path(self.tmp.name) / (gate.digest("session-a") + ".json")
+        for enabled, expected in ((["task"], []), (["task", "skill"], ["skill"]),
+                                  (["task", "skill", "subagent"], ["skill", "subagent"])):
+            previous = {"version": 1, "enabled": enabled, "turn": "old-turn",
+                        "pending": True, "active": "old-unit", "prepared": {"old-spawn": "old-unit"},
+                        "units": {"old-unit": {"result": {"decisions": {"task": {"choice": "fast"}}}}}}
+            path.write_text(json.dumps(previous))
+            self.send("SessionStart", source="resume")
+            current = json.loads(path.read_text())
+            self.assertEqual(current["version"], 2)
+            self.assertEqual(current["enabled"], expected)
+            self.assertEqual(current["units"], {})
+            self.assertEqual(current["prepared"], {})
+            self.assertIsNone(current["active"])
+            self.assertNotIn('"task"', path.read_text())
+        self.router.assert_not_called()
+
+    def test_child_decision_combinations_leave_the_main_model_untouched(self):
+        spawn = {"task_name": "reader", "message": "Summarize a bounded module",
+                 "fork_turns": "none", "model": "child-deep"}
+        for scopes in (("skill",), ("subagent",), ("skill", "subagent")):
+            with self.subTest(scopes=scopes):
+                self.send("SessionStart", source="startup")
+                self.enable(" ".join(scopes))
+                self.prompt()
+                local = unit(("skill",) if "skill" in scopes else ())
+                self.begin(local)
+                self.assertEqual(self.read(), {})
+                data = unit(scopes, target="subagent", unit_id="child-reader", spawn=spawn)
+                before = self.router.call_count
+                result = self.begin(data)
+                self.assertEqual(set(result["decisions"]), set(scopes))
+                self.assertNotIn("task_model_application", result)
+                self.assertNotIn("model", result)
+                self.assertTrue(self.begin(data)["cached"])
+                self.assertEqual(self.router.call_count, before + 1)
+                rewritten = self.send("PreToolUse", tool_name="spawn_agent", tool_input=spawn)
+                if "subagent" in scopes:
+                    updated = rewritten["hookSpecificOutput"]["updatedInput"]
+                    self.assertEqual(updated, {**spawn, "model": "child-fast"})
+                else:
+                    self.assertEqual(rewritten, {})
+                self.assertEqual(self.read(), {})
 
     def test_only_anchored_human_control_enables_routing(self):
         for text in ('Please run jev on', '"jev on"', 'Example: jev on',
@@ -99,14 +180,15 @@ class GateTests(unittest.TestCase):
         self.assertEqual(first["status"], "recommended")
         self.assertFalse(first["cached"])
         self.assertTrue(second["cached"])
-        self.assertEqual(first["decisions"]["task"]["choice"], "fast")
-        self.assertEqual(first["task_model_application"], "pending_host_switch")
+        self.assertEqual(first["decisions"]["skill"]["choices"], ["testing", "docs"])
+        self.assertNotIn("task_model_application", first)
+        self.assertNotIn("model", first)
         self.assertEqual(self.read(), {})
         self.assertEqual(self.read(), {})
         self.router.assert_called_once()
 
     def test_independent_children_remain_prepared_and_route_in_parallel(self):
-        self.enable("task subagent")
+        self.enable("skill subagent")
         self.prompt()
         self.begin(unit(unit_id="read-enabled"))
         barrier = threading.Barrier(2)
@@ -119,7 +201,7 @@ class GateTests(unittest.TestCase):
         for index in range(2):
             spawn = {"task_name": "child_" + str(index), "message": "Read one bounded module",
                      "fork_turns": "none", "model": "child-deep", "reasoning_effort": "high"}
-            data = unit(("subagent",), target="subagent", unit_id="child-" + str(index),
+            data = unit(("skill", "subagent"), target="subagent", unit_id="child-" + str(index),
                         spawn=spawn, efforts={"child-fast": ["low"]})
             children.append((spawn, data))
         def begin_child(data):
@@ -287,7 +369,7 @@ class GateTests(unittest.TestCase):
         result = self.begin()
         self.assertEqual(result["status"], "fallback")
         self.assertEqual(result["code"], "http_error")
-        self.assertIn("current model", result["message"])
+        self.assertIn("ordinary skill workflow", result["message"])
         self.assertTrue(self.begin()["cached"])
         self.assertEqual(self.read(), {})
         self.router.assert_called_once()
@@ -308,11 +390,11 @@ class GateTests(unittest.TestCase):
                          ["hookSpecificOutput"]["permissionDecision"], "deny")
 
     def test_stale_turn_child_skip_and_missing_decision_domains(self):
-        self.enable("task skill")
+        self.enable("skill subagent")
         self.prompt()
         self.assertEqual(self.read(turn_id="child-turn"), {})
-        for data, code in ((unit(), "decision_scope_mismatch"),
-                           (unit(("task", "skill"), turn_id="old-turn"), "stale_turn")):
+        for data, code in ((unit(()), "decision_scope_mismatch"),
+                           (unit(turn_id="old-turn"), "stale_turn")):
             with self.assertRaises(gate.GateError) as error:
                 self.begin(data)
             self.assertEqual(error.exception.code, code)
@@ -343,14 +425,16 @@ class GateTests(unittest.TestCase):
         self.router.assert_not_called()
 
     def test_invalid_router_choice_is_cached_as_fallback(self):
-        self.enable()
+        self.enable("subagent")
         self.prompt()
+        spawn = {"task_name": "reader", "message": "Summarize a module", "fork_turns": "none"}
         for index, choice in enumerate(("not-in-inventory", [], None)):
-            result = recommendation(unit()["request"])
-            result["decisions"]["task"]["choice"] = choice
+            data = unit(("subagent",), target="subagent", spawn=spawn,
+                        unit_id="bad-router-" + str(index))
+            result = recommendation(data["request"])
+            result["decisions"]["subagent"]["choice"] = choice
             self.router.side_effect = None
             self.router.return_value = result
-            data = unit(unit_id="bad-router-" + str(index))
             self.assertEqual(self.begin(data)["status"], "fallback")
             self.assertTrue(self.begin(data)["cached"])
         self.assertEqual(self.router.call_count, 3)
@@ -358,7 +442,7 @@ class GateTests(unittest.TestCase):
     def test_controls_support_explicit_invocations_and_independent_off(self):
         for prefix in ("jev", "$jev", "$shuaigle:jev", "/jev", "/shuaigle:jev"):
             self.send("UserPromptSubmit", prompt=prefix + " on all", turn_id="control")
-            self.send("UserPromptSubmit", prompt=prefix + " off skill subagent", turn_id="control")
+            self.send("UserPromptSubmit", prompt=prefix + " off subagent", turn_id="control")
             self.prompt()
             self.begin(unit(unit_id="read-" + str(len(prefix))))
             self.send("UserPromptSubmit", prompt=prefix + " off", turn_id="control")
@@ -384,7 +468,8 @@ class GateTests(unittest.TestCase):
         result = self.cli(["--help"], b"")
         self.assertEqual(result.returncode, 0)
         self.assertIn(b"unit_id", result.stdout)
-        self.assertIn(b"pending_host_switch", result.stdout)
+        self.assertIn(b"main model stays unchanged", result.stdout)
+        self.assertNotIn(b"current_model", result.stdout)
         for raw in (b'{"session_id":"a","session_id":"b"}',
                     b"x" * (gate.MAX_BYTES + 1), SECRET.encode(), b"{broken"):
             result = self.cli(["begin"], raw)
@@ -400,11 +485,9 @@ class GateTests(unittest.TestCase):
         self.assertEqual(json.loads(result.stdout)["hookSpecificOutput"]["permissionDecision"], "deny")
 
     def test_receipt_reuse_reaches_real_router_http_boundary_once(self):
-        self.enable("task skill")
+        self.enable("skill")
         self.prompt()
         body = {"model": "jev-test", "answers": {
-            "task": {"type": "choice", "choice": "fast", "confidence": 0.8,
-                     "probabilities": {"fast": 0.8, "deep": 0.2}},
             "skill_0": {"type": "choice", "choice": "select", "confidence": 0.8,
                         "probabilities": {"select": 0.8, "skip": 0.2}},
             "skill_1": {"type": "choice", "choice": "skip", "confidence": 0.8,
@@ -414,14 +497,47 @@ class GateTests(unittest.TestCase):
         self.router.side_effect = REAL_ROUTE
         with patch.object(route.http.client, "HTTPSConnection") as connection:
             connection.return_value.getresponse.return_value = response
-            result = self.begin(unit(("task", "skill")))
+            result = self.begin()
             self.assertEqual(result["decisions"]["skill"]["choices"], ["testing"])
-            self.begin(unit(("task", "skill")))
+            self.begin()
             self.read()
             self.read()
             connection.return_value.request.assert_called_once()
             payload = json.loads(connection.return_value.request.call_args.kwargs["body"])
-            self.assertEqual(set(payload["questions"]), {"task", "skill_0", "skill_1"})
+            self.assertEqual(set(payload["questions"]), {"skill_0", "skill_1"})
+            self.assertNotIn("session-a", json.dumps(payload))
+
+    def test_bare_on_batches_child_skills_and_model_in_one_real_router_request(self):
+        self.send("UserPromptSubmit", prompt="jev on", turn_id="control")
+        self.prompt()
+        spawn = {"task_name": "reader", "message": "Summarize a bounded module",
+                 "fork_turns": "none", "model": "child-deep", "reasoning_effort": "high"}
+        data = unit(("skill", "subagent"), target="subagent", unit_id="child-reader",
+                    spawn=spawn, efforts={"child-fast": ["low"]})
+        body = {"model": "jev-test", "answers": {
+            "subagent": {"type": "choice", "choice": "child-fast", "confidence": 0.8,
+                         "probabilities": {"child-fast": 0.8, "child-deep": 0.2}},
+            "skill_0": {"type": "choice", "choice": "select", "confidence": 0.8,
+                        "probabilities": {"select": 0.8, "skip": 0.2}},
+            "skill_1": {"type": "choice", "choice": "select", "confidence": 0.8,
+                        "probabilities": {"select": 0.8, "skip": 0.2}}}}
+        response = MagicMock(status=200)
+        response.read.return_value = json.dumps(body).encode()
+        self.router.side_effect = REAL_ROUTE
+        with patch.object(route.http.client, "HTTPSConnection") as connection:
+            connection.return_value.getresponse.return_value = response
+            result = self.begin(data)
+            self.assertEqual(result["decisions"]["skill"]["choices"], ["testing", "docs"])
+            self.assertNotIn("model", result)
+            self.assertNotIn("task_model_application", result)
+            self.assertTrue(self.begin(data)["cached"])
+            rewritten = self.send("PreToolUse", tool_name="spawn_agent", tool_input=spawn)
+            self.assertEqual(rewritten["hookSpecificOutput"]["updatedInput"],
+                             {**spawn, "model": "child-fast", "reasoning_effort": "low"})
+            connection.return_value.request.assert_called_once()
+            payload = json.loads(connection.return_value.request.call_args.kwargs["body"])
+            self.assertEqual(set(payload["questions"]), {"subagent", "skill_0", "skill_1"})
+            self.assertNotIn("current_model", payload["state"])
             self.assertNotIn("session-a", json.dumps(payload))
 
 

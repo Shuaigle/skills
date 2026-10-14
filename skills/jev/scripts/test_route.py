@@ -18,24 +18,23 @@ import route
 SECRET = "test-env-secret-please-never-echo"
 
 
-def task():
-    return {"host": "test-host", "task": "Rename a local variable",
-            "models": [{"id": "fast", "description": "Fast model for simple tasks"},
-                       {"id": "deep", "description": "Stronger reasoning for hard tasks"}],
-            "current_model": "deep", "preference": "Prefer low latency"}
+def child_request():
+    return {"host": "test-host", "task": "Rename a local variable in a delegated unit",
+            "decisions": {"subagent": [
+                {"id": "fast", "description": "Fast model for simple child tasks"},
+                {"id": "deep", "description": "Stronger reasoning for hard child tasks"}]},
+            "preference": "Prefer low latency"}
 
 
 def answer():
-    return {"model": "jev-1.13.0", "answers": {"model": {
+    return {"model": "jev-1.13.0", "answers": {"subagent": {
         "type": "choice", "choice": "fast", "confidence": 0.81,
         "probabilities": {"fast": 0.88, "deep": 0.12}}},
         "usage": {"input_tokens": 318, "output_tokens": 34}}
 
 
-def batch(scopes=("task", "skill", "subagent")):
+def batch(scopes=("skill", "subagent")):
     choices = {
-        "task": [{"id": "task-fast", "description": "Fast for simple parent tasks"},
-                 {"id": "task-deep", "description": "Deeper reasoning for parent tasks"}],
         "skill": [{"id": "test-first", "description": "Implement a feature using tests"}],
         "subagent": [{"id": "child-fast", "description": "Fast for small delegated tasks"},
                      {"id": "child-deep", "description": "Deeper reasoning for child tasks"}],
@@ -81,29 +80,29 @@ class InputTests(unittest.TestCase):
         with patch.dict(route.os.environ, {}, clear=True), patch.object(
                 route.http.client, "HTTPSConnection") as connection:
             with self.assertRaisesRegex(route.RoutingError, "") as error:
-                route.route(task())
+                route.route(child_request())
             self.assertEqual(error.exception.code, "missing_api_key")
             connection.assert_not_called()
 
     def test_invalid_inputs_are_rejected(self):
-        invalid = [None, {}, {**task(), "unknown": True}, {**task(), "models": []},
-                   {**task(), "host": " "}, {**task(), "task": "task\nprivate"},
-                   {**task(), "current_model": "unavailable"},
-                   {**task(), "preference": None},
-                   {**task(), "models": task()["models"] * 2},
-                   {**task(), "models": [{"id": "fast", "description": ""}]},
-                   {**task(), "models": [{"id": "fast", "description": "valid", "x": 1}]},
-                   {**task(), "models": [{"id": str(i), "description": "model"}
-                                         for i in range(256)]}]
+        invalid = [None, {}, {**child_request(), "unknown": True},
+                   {**child_request(), "decisions": {"subagent": []}},
+                   {**child_request(), "host": " "}, {**child_request(), "task": "task\nprivate"},
+                   {**child_request(), "preference": None},
+                   {**child_request(), "decisions": {"subagent": child_request()["decisions"]["subagent"] * 2}},
+                   {**child_request(), "decisions": {"subagent": [{"id": "fast", "description": ""}]}},
+                   {**child_request(), "decisions": {"subagent": [{"id": "fast", "description": "valid", "x": 1}]}},
+                   {**child_request(), "decisions": {"subagent": [
+                       {"id": str(i), "description": "model"} for i in range(256)]}}]
         for value in invalid:
             with self.subTest(value=value), self.assertRaises(route.RoutingError):
                 route.validate_input(value)
 
     def test_one_and_255_candidates_are_valid(self):
         for count in (1, 255):
-            value = {**task(), "models": [{"id": str(i), "description": "model"}
-                                          for i in range(count)], "current_model": "0"}
-            self.assertEqual(len(route.validate_input(value)["model"]), count)
+            value = {**child_request(), "decisions": {"subagent": [
+                {"id": str(i), "description": "model"} for i in range(count)]}}
+            self.assertEqual(len(route.validate_input(value)["subagent"]), count)
 
 
 class RequestTests(unittest.TestCase):
@@ -118,7 +117,7 @@ class RequestTests(unittest.TestCase):
         self.connection.getresponse.return_value = response()
 
     def test_real_request_shape_key_only_in_header(self):
-        result = route.route(task())
+        result = route.route(child_request())
         self.factory.assert_called_once()
         self.assertEqual(self.factory.call_args.args, ("api.typesafe.ai",))
         self.assertGreater(self.factory.call_args.kwargs["timeout"], 0)
@@ -130,21 +129,22 @@ class RequestTests(unittest.TestCase):
         self.assertNotIn(SECRET.encode(), call.kwargs["body"])
         payload = json.loads(call.kwargs["body"])
         self.assertEqual(payload["model"], "jev-latest")
-        self.assertEqual(payload["state"], {key: task()[key] for key in (
-            "host", "task", "current_model", "preference")})
-        self.assertEqual(payload["questions"]["model"]["type"], "choice")
-        self.assertEqual(payload["questions"]["model"]["criteria"], {
-            "fast": task()["models"][0]["description"],
-            "deep": task()["models"][1]["description"]})
+        self.assertEqual(payload["state"], {key: child_request()[key] for key in (
+            "host", "task", "preference")})
+        self.assertEqual(payload["questions"]["subagent"]["type"], "choice")
+        self.assertEqual(payload["questions"]["subagent"]["criteria"], {
+            "fast": child_request()["decisions"]["subagent"][0]["description"],
+            "deep": child_request()["decisions"]["subagent"][1]["description"]})
         self.assertEqual(result, {"status": "recommended", "host": "test-host",
-                                 "model": "fast", "confidence": 0.81,
-                                 "probabilities": {"fast": 0.88, "deep": 0.12},
+                                 "decisions": {"subagent": {
+                                     "choice": "fast", "confidence": 0.81,
+                                     "probabilities": {"fast": 0.88, "deep": 0.12}}},
                                  "router_model": "jev-1.13.0"})
         self.connection.close.assert_called_once()
 
     def test_key_in_task_is_rejected_before_network(self):
         with self.assertRaises(route.RoutingError) as error:
-            route.route({**task(), "task": SECRET})
+            route.route({**child_request(), "task": SECRET})
         self.assertEqual(error.exception.code, "unsafe_input")
         self.factory.assert_not_called()
 
@@ -152,16 +152,15 @@ class RequestTests(unittest.TestCase):
         for key in (SECRET + '"suffix', SECRET + '\\suffix'):
             values = []
             for field in ("host", "task", "preference"):
-                values.append({**task(), field: "prefix " + key + " suffix"})
-            value = task()
-            value["models"][0]["description"] = "prefix " + key + " suffix"
+                values.append({**child_request(), field: "prefix " + key + " suffix"})
+            value = child_request()
+            value["decisions"]["subagent"][0]["description"] = "prefix " + key + " suffix"
             values.append(value)
-            value = task()
-            value["models"][0]["id"] = key
+            value = child_request()
+            value["decisions"]["subagent"][0]["id"] = key
             values.append(value)
-            value = task()
-            value["models"][1]["id"] = key
-            value["current_model"] = key
+            value = child_request()
+            value["decisions"]["subagent"][1]["id"] = key
             values.append(value)
             for index, value in enumerate(values):
                 with self.subTest(key_type=key[-7], field_index=index), patch.dict(
@@ -174,7 +173,7 @@ class RequestTests(unittest.TestCase):
     def test_redirect_is_rejected_without_following(self):
         self.connection.getresponse.return_value = response(302)
         with self.assertRaises(route.RoutingError) as error:
-            route.route(task())
+            route.route(child_request())
         self.assertEqual(error.exception.code, "http_error")
         self.connection.request.assert_called_once()
 
@@ -182,7 +181,7 @@ class RequestTests(unittest.TestCase):
         self.connection.getresponse.return_value = response(429, retry_after="9999")
         with patch.object(route.Deadline, "wait") as sleep:
             with self.assertRaises(route.RoutingError) as error:
-                route.route(task())
+                route.route(child_request())
         self.assertEqual(error.exception.code, "http_error")
         self.assertEqual(self.connection.request.call_count, 3)
         self.assertEqual([call.args[0] for call in sleep.call_args_list], [2, 2])
@@ -191,14 +190,14 @@ class RequestTests(unittest.TestCase):
     def test_overload_and_server_errors_retry_then_succeed(self):
         self.connection.getresponse.side_effect = [response(529), response(503), response()]
         with patch.object(route.Deadline, "wait") as sleep:
-            self.assertEqual(route.route(task())["model"], "fast")
+            self.assertEqual(route.route(child_request())["decisions"]["subagent"]["choice"], "fast")
         self.assertEqual([call.args[0] for call in sleep.call_args_list], [0.5, 1])
 
     def test_authentication_error_does_not_retry_or_read_body(self):
         reply = response(401, {"error": SECRET})
         self.connection.getresponse.return_value = reply
         with self.assertRaises(route.RoutingError) as error:
-            route.route(task())
+            route.route(child_request())
         self.assertEqual(error.exception.code, "authentication_failed")
         self.connection.request.assert_called_once()
         reply.read.assert_not_called()
@@ -206,7 +205,7 @@ class RequestTests(unittest.TestCase):
     def test_timeout_has_no_secret_and_closes_connection(self):
         self.connection.request.side_effect = TimeoutError(SECRET)
         with self.assertRaises(route.RoutingError) as error:
-            route.route(task())
+            route.route(child_request())
         self.assertEqual(error.exception.code, "network_error")
         self.assertNotIn(SECRET, str(error.exception))
         self.connection.close.assert_called_once()
@@ -216,7 +215,7 @@ class RequestTests(unittest.TestCase):
             self.connection.getresponse.return_value.read.return_value = body
             with self.subTest(body_length=len(body)), self.assertRaises(
                     route.RoutingError) as error:
-                route.route(task())
+                route.route(child_request())
             self.assertEqual(error.exception.code, "invalid_response")
 
 
@@ -268,7 +267,7 @@ class DeadlineTests(unittest.TestCase):
                     patch.object(route, "TIMEOUT", 0.04), \
                     patch.object(route.http.client, "HTTPSConnection", return_value=connection):
                 with self.assertRaises(route.RoutingError) as error:
-                    route.route(task())
+                    route.route(child_request())
             self.assertEqual(error.exception.code, "network_error")
             self.assertLess(time.monotonic() - started, 0.12)
             self.assertTrue(finished.wait(0.2))
@@ -300,7 +299,7 @@ class DeadlineTests(unittest.TestCase):
             with patch.object(route, "TIMEOUT", 0.04), patch.object(
                     route.http.client, "HTTPSConnection", return_value=connection):
                 with self.assertRaises(route.RoutingError) as error:
-                    route.route(task())
+                    route.route(child_request())
             self.assertEqual(error.exception.code, "network_error")
             self.assertLess(time.monotonic() - started, 0.12)
             connection.request.assert_not_called()
@@ -332,7 +331,7 @@ class DeadlineTests(unittest.TestCase):
             with patch.object(route, "TIMEOUT", 0.04), patch.object(
                     route.http.client, "HTTPSConnection", return_value=connection):
                 with self.assertRaises(route.RoutingError) as error:
-                    route.route(task())
+                    route.route(child_request())
             self.assertEqual(error.exception.code, "network_error")
             self.assertLess(time.monotonic() - started, 0.12)
             self.assertTrue(closed.wait(0.5))
@@ -348,7 +347,7 @@ class DeadlineTests(unittest.TestCase):
         with patch.object(route, "TIMEOUT", 0.04), patch.object(
                 route.http.client, "HTTPSConnection", return_value=connection) as factory:
             with self.assertRaises(route.RoutingError) as error:
-                route.route(task())
+                route.route(child_request())
         self.assertEqual(error.exception.code, "network_error")
         self.assertLess(time.monotonic() - started, 0.12)
         factory.assert_called_once()
@@ -372,7 +371,7 @@ class DeadlineTests(unittest.TestCase):
                 patch.object(route.Deadline, "wait", autospec=True, side_effect=backoff), \
                 patch.object(route.http.client, "HTTPSConnection", return_value=connection) as factory:
             with self.assertRaises(route.RoutingError) as error:
-                route.route(task())
+                route.route(child_request())
         self.assertEqual(error.exception.code, "network_error")
         self.assertEqual(connection.request.call_count, 2)
         timeouts = [call.kwargs["timeout"] for call in factory.call_args_list]
@@ -396,18 +395,18 @@ class ResponseTests(unittest.TestCase):
         ]
         for change in changes:
             value = copy.deepcopy(answer())
-            value["answers"]["model"].update(change)
+            value["answers"]["subagent"].update(change)
             variations.append(value)
         for value in variations:
             with self.subTest(value=value), self.assertRaises(route.RoutingError) as error:
-                route.validate_response(value, task(), route.validate_input(task()))
+                route.validate_response(value, child_request(), route.validate_input(child_request()))
             self.assertEqual(error.exception.code, "invalid_response")
 
     def test_distribution_rounding_and_ties_are_allowed(self):
         value = answer()
-        value["answers"]["model"]["probabilities"] = {"fast": 0.499, "deep": 0.499}
+        value["answers"]["subagent"]["probabilities"] = {"fast": 0.499, "deep": 0.499}
         self.assertEqual(route.validate_response(
-            value, task(), route.validate_input(task()))["model"], "fast")
+            value, child_request(), route.validate_input(child_request()))["decisions"]["subagent"]["choice"], "fast")
 
 
 class BatchTests(unittest.TestCase):
@@ -458,9 +457,9 @@ class BatchTests(unittest.TestCase):
             self.assertEqual(question["instructions"]["skill"], skill)
             self.assertEqual(set(question["criteria"]), {"select", "skip"})
 
-    def test_seven_scope_combinations_batch_only_selected_questions(self):
-        scopes = ("task", "skill", "subagent")
-        for count in range(1, 4):
+    def test_three_scope_combinations_batch_only_selected_questions(self):
+        scopes = ("skill", "subagent")
+        for count in range(1, 3):
             for selected in itertools.combinations(scopes, count):
                 with self.subTest(scopes=selected):
                     self.factory.reset_mock()
@@ -537,11 +536,10 @@ class BatchTests(unittest.TestCase):
         value["decisions"]["skill"] = []
         result = self.recommend(value)
         self.assertEqual(result["decisions"]["skill"], {"choices": [], "evaluations": {}})
-        self.assertEqual(result["decisions"]["task"]["choice"], "task-fast")
         self.assertEqual(result["decisions"]["subagent"]["choice"], "child-fast")
         self.connection.request.assert_called_once()
         payload = json.loads(self.connection.request.call_args.kwargs["body"])
-        self.assertEqual(set(payload["questions"]), {"task", "subagent"})
+        self.assertEqual(set(payload["questions"]), {"subagent"})
 
     def test_skill_ids_cannot_collide_with_question_ids_or_special_words(self):
         value = batch()
@@ -554,34 +552,44 @@ class BatchTests(unittest.TestCase):
         body["answers"] = dict(reversed(list(body["answers"].items())))
         result = self.recommend(value, body)
         self.assertEqual(result["decisions"]["skill"]["choices"], selected)
-        self.assertEqual(result["decisions"]["task"]["choice"], "task-fast")
         self.assertEqual(result["decisions"]["subagent"]["choice"], "child-fast")
         self.connection.request.assert_called_once()
         payload = json.loads(self.connection.request.call_args.kwargs["body"])
         self.assertEqual(set(payload["questions"]), {
-            "task", "subagent", "skill_0", "skill_1", "skill_2", "skill_3", "skill_4", "skill_5"})
+            "subagent", "skill_0", "skill_1", "skill_2", "skill_3", "skill_4", "skill_5"})
         self.assertEqual(payload["questions"]["skill_0"]["instructions"]["skill"]["id"], "task")
         self.assertEqual(payload["questions"]["skill_2"]["instructions"]["skill"]["id"], "skill_0")
 
-    def test_child_summary_and_current_model_are_forwarded_when_applicable(self):
+    def test_child_summary_and_preference_are_forwarded(self):
         value = batch(("subagent",))
         value["task"] = "Inspect only the child parser edge cases"
         self.recommend(value)
         payload = json.loads(self.connection.request.call_args.kwargs["body"])
-        self.assertEqual(payload["state"]["task"], value["task"])
-        self.assertNotIn("current_model", payload["state"])
-        value = batch(("task", "skill"))
-        value["current_model"] = "task-deep"
-        self.recommend(value)
-        payload = json.loads(self.connection.request.call_args.kwargs["body"])
-        self.assertEqual(payload["state"]["current_model"], "task-deep")
+        self.assertEqual(payload["state"], {
+            "host": value["host"], "task": value["task"], "preference": value["preference"]})
+
+    def test_removed_main_model_contracts_never_read_credentials_or_connect(self):
+        models = child_request()["decisions"]["subagent"]
+        invalid = [
+            {"host": "test-host", "task": "Old caller", "models": models},
+            {**batch(), "models": models},
+            {**batch(), "current_model": "child-fast"},
+            {**batch(), "decisions": {"task": models}},
+            {**batch(), "decisions": {**batch()["decisions"], "task": models}},
+        ]
+        with patch.object(route.os.environ, "get", side_effect=AssertionError("No environment read")):
+            for value in invalid:
+                with self.subTest(value=value), self.assertRaises(route.RoutingError) as error:
+                    route.route(value)
+                self.assertEqual(error.exception.code, "invalid_input")
+        self.factory.assert_not_called()
 
     def test_invalid_scopes_candidates_and_current_model_never_connect(self):
         invalid = [
-            {**batch(), "models": task()["models"]},
+            {**batch(), "models": child_request()["decisions"]["subagent"]},
             {**batch(), "decisions": []},
             {**batch(), "decisions": {"unknown": []}},
-            {**batch(), "decisions": {"TASK": task()["models"]}},
+            {**batch(), "decisions": {"TASK": child_request()["decisions"]["subagent"]}},
             {**batch(), "decisions": {"task": []}},
             {**batch(), "decisions": {"subagent": []}},
             {**batch(), "decisions": {"skill": batch()["decisions"]["skill"] * 2}},
@@ -603,7 +611,7 @@ class BatchTests(unittest.TestCase):
         self.factory.assert_not_called()
 
     def test_scope_candidate_bounds(self):
-        for scope, minimum, maximum in (("task", 1, 255), ("subagent", 1, 255),
+        for scope, minimum, maximum in (("subagent", 1, 255),
                                          ("skill", 0, 254)):
             for count in (minimum, maximum, maximum + 1):
                 with self.subTest(scope=scope, count=count):
@@ -644,7 +652,7 @@ class BatchTests(unittest.TestCase):
                 changed["answers"][scope].update(change)
                 variations.append(changed)
         extra = copy.deepcopy(original)
-        extra["answers"]["model"] = answer()["answers"]["model"]
+        extra["answers"]["model"] = answer()["answers"]["subagent"]
         variations.append(extra)
         obsolete = copy.deepcopy(original)
         del obsolete["answers"]["skill_0"]
@@ -655,7 +663,7 @@ class BatchTests(unittest.TestCase):
         }
         variations.append(obsolete)
         cross = copy.deepcopy(original)
-        cross["answers"]["task"] = original["answers"]["subagent"]
+        cross["answers"]["subagent"] = original["answers"]["skill_0"]
         variations.append(cross)
         for body in variations:
             with self.subTest(body=body), self.assertRaises(route.RoutingError) as error:
@@ -664,7 +672,7 @@ class BatchTests(unittest.TestCase):
 
     def test_batch_key_guard_checks_ids_and_descriptions_before_serializing(self):
         for key in (SECRET + '"suffix', SECRET + '\\suffix'):
-            for scope in ("task", "skill", "subagent"):
+            for scope in ("skill", "subagent"):
                 for field in ("id", "description"):
                     value = batch((scope,))
                     value["decisions"][scope][0][field] = "prefix " + key + " suffix"
@@ -691,10 +699,10 @@ class CliTests(unittest.TestCase):
 
     def test_cli_never_prints_input_or_exception_contents(self):
         for error in (None, ValueError(SECRET), route.RoutingError("network_error")):
-            code, output = self.run_cli(json.dumps(task()).encode(), error)
+            code, output = self.run_cli(json.dumps(child_request()).encode(), error)
             self.assertEqual(code, 1)
             self.assertNotIn(SECRET, output)
-            self.assertNotIn(task()["task"], output)
+            self.assertNotIn(child_request()["task"], output)
             self.assertEqual(json.loads(output)["status"], "error")
 
     def test_cli_rejects_malformed_and_oversized_json(self):

@@ -19,7 +19,7 @@ import route
 MAX_BYTES = 131072
 MAX_STATE_BYTES = 4194304
 MAX_UNITS = 2048
-SCOPES = {"task", "skill", "subagent"}
+SCOPES = {"skill", "subagent"}
 KINDS = {"read", "edit", "verify", "research", "work"}
 SCRIPT = Path(__file__).resolve()
 SKILL = SCRIPT.parent.parent
@@ -57,7 +57,7 @@ def identifier(value):
 
 
 def blank_state():
-    return {"version": 1, "enabled": [], "turn": None,
+    return {"version": 2, "enabled": [], "turn": None,
             "pending": False, "active": None, "prepared": {}, "units": {}}
 
 
@@ -115,10 +115,17 @@ def locked_state(session_id, state_dir=None):
                 raw = source.read(MAX_STATE_BYTES + 1)
             require(len(raw) <= MAX_STATE_BYTES, "invalid_state")
             state = json.loads(raw, object_pairs_hook=unique_object)
-            require(isinstance(state, dict) and state.get("version") == 1
+            require(isinstance(state, dict) and state.get("version") in {1, 2}
                     and isinstance(state.get("units"), dict)
                     and isinstance(state.get("enabled"), list)
-                    and set(state["enabled"]) <= SCOPES, "invalid_state")
+                    and set(state["enabled"]) <= (SCOPES | {"task"}
+                         if state["version"] == 1 else SCOPES), "invalid_state")
+            if state["version"] == 1:
+                # Preserve existing human authorization, never resurrect the
+                # retired task scope or reuse receipts from its old contract.
+                enabled = sorted(set(state["enabled"]) & SCOPES)
+                state = blank_state()
+                state["enabled"] = enabled
         else:
             state = blank_state()
         yield state
@@ -157,7 +164,7 @@ def control(first_line):
         return (action if len(words) == 1 else "invalid", set())
     arguments = words[1:]
     if not arguments:
-        scopes = {"task"} if action == "on" else set(SCOPES)
+        scopes = set(SCOPES)
     elif arguments == ["all"]:
         scopes = set(SCOPES)
     elif set(arguments) <= SCOPES:
@@ -228,7 +235,7 @@ def handle_hook(event, state_dir=None):
         if event.get("turn_id") is not None and not turn_matches(event["turn_id"], state):
             return {}
         if name == "Stop":
-            if (state["pending"] and set(state["enabled"]) & {"task", "skill"}
+            if (state["pending"] and "skill" in state["enabled"]
                     and state["active"] is None and not event.get("stop_hook_active")):
                 return {"decision": "block", "reason":
                         "Jev is enabled: declare and route the pending work with codex_gate.py begin before finishing."}
@@ -314,7 +321,7 @@ def begin_unit(data, state_dir=None):
     with file_lock(lock_path, route.TIMEOUT + 2):
         with locked_state(data["session_id"], state_dir) as state:
             require(turn_matches(data["turn_id"], state), "stale_turn")
-            applicable = {"task", "skill"} if data["target"] == "local" else {"subagent", "skill"}
+            applicable = {"skill"} if data["target"] == "local" else SCOPES
             enabled = set(state["enabled"]) & applicable
             require(set(candidates) == enabled, "decision_scope_mismatch")
             fingerprint_data = {"request": data["request"], "kind": data["kind"],
@@ -357,14 +364,9 @@ def begin_unit(data, state_dir=None):
             else:
                 state["prepared"][receipt["spawn"]] = unit_key
             result = {**receipt["result"], "unit_id": data["unit_id"], "cached": cached}
-            task_choice = result["decisions"].get("task")
-            if task_choice:
-                result["task_model_application"] = (
-                    "already_current" if task_choice["choice"] == data["request"].get("current_model")
-                    else "pending_host_switch")
             if result["status"] == "fallback":
                 result["message"] = (
-                    "Jev routing failed; reuse the current model and ordinary skill workflow for this unit.")
+                    "Jev routing failed; use the ordinary skill workflow and inherited child model for this unit.")
             return result
 
 
@@ -475,7 +477,7 @@ def pre_tool(event, state):
                 updated.pop("reasoning_effort")
         return {"hookSpecificOutput": {"hookEventName": "PreToolUse",
                                        "permissionDecision": "allow", "updatedInput": updated}}
-    if not enabled & {"task", "skill"}:
+    if "skill" not in enabled:
         return {}
     receipt = state["units"].get(state["active"], {})
     if receipt.get("target") != "local":
@@ -492,7 +494,8 @@ HELP = """usage: codex_gate.py hook|begin < JSON
 
 hook accepts trusted Codex SessionStart, SessionEnd, UserPromptSubmit,
 PreToolUse and Stop events. Only an anchored first-line human jev control in
-UserPromptSubmit changes task/skill/subagent flags. New conversations are off.
+UserPromptSubmit changes skill/subagent flags. New conversations are off.
+Bare jev on and jev on all enable both. The retired task control is invalid.
 
 begin fields:
   session_id, turn_id: echo the host context; turn_id may be its emitted token.
@@ -502,10 +505,10 @@ begin fields:
         tools; definite edits/tests outside compatible units need a new unit.
   target: local | subagent.
   request: route.py batch {host: "codex", task: sanitized summary,
-           decisions: {task?: live candidates, skill?: eligible candidates,
+           decisions: {skill?: eligible candidates,
                        subagent?: live spawn-model candidates},
-           current_model?: verified current task model, preference?: string}.
-           Include exactly the enabled applicable domains: local task/skill,
+           preference?: string}.
+           Include exactly the enabled applicable domains: local skill,
            or child subagent/skill. Candidates are {id, description} objects.
   spawn: exact planned child tool arguments, required only for subagent;
          Codex spawn_agent requires fork_turns: "none" and a self-contained
@@ -515,10 +518,10 @@ begin fields:
 The same unit_id and immutable input reuse one routing receipt across tools,
 continuations and concurrent duplicate begins. Changed work or inventories
 require a new unit_id. Different units may route concurrently. Failed routing
-is a visible cached fallback to the current/inherited model and ordinary
+is a visible cached fallback to the inherited child model and ordinary
 skills; repeated tools do not retry Jev. Skill choices can contain zero or
-multiple IDs. A local task recommendation reports pending_host_switch unless
-it is already_current; hooks cannot switch the active parent turn.
+multiple IDs. The main model stays unchanged; routing selects optional skills
+and models only for planned fresh-context children.
 
 Bootstrap work gate with exactly:
   python3 <absolute installed codex_gate.py> begin <<'JEV_UNIT'

@@ -2,449 +2,343 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { register, summarizeTask, modelCandidates } from '../claude/register.js';
 
-const CANONICAL = { haiku: 'claude-haiku-test', sonnet: 'claude-sonnet-test',
-  opus: 'claude-opus-test', fable: 'claude-fable-test' };
-
 function host(options = {}) {
   const hooks = new Map();
-  const calls = { processes: [], resolutions: [], logs: [], commands: [], env: 0, configs: 0 };
+  const calls = { processes: [], logs: [], commands: [], env: 0, configs: 0 };
   let rows = options.rows ?? [{ key: 'model', kind: 'choice', isLocked: false,
     options: ['default', 'sonnet', 'opus', 'haiku', 'best', 'opusplan', 'opus[1m]'] }];
   let key = options.key === undefined ? 'synthetic-test-key' : options.key;
   const $ = {
     plugin: { root: '/test/plugin' },
-    env: { get: async name => {
-      assert.equal(name, 'JEV_API_KEY'); calls.env++; return key;
-    } },
-    command: {
-      register: async spec => { calls.commands.push(spec); },
-      list: async () => options.commands ?? [],
-    },
+    env: { get: async name => { assert.equal(name, 'JEV_API_KEY'); calls.env++; return key; } },
+    command: { register: async spec => { calls.commands.push(spec); }, list: async () => options.commands ?? [] },
     config: { list: async () => { calls.configs++; return rows; } },
     settings: { read: async () => options.settings ?? {} },
-    session: { version: async () => ({ version: options.version ?? '2.1.296' }) },
     ui: { log: text => { calls.logs.push(text); } },
     process: { run: async (argv, init) => {
-      if (argv[1].endsWith('/claude_models.py')) {
-        calls.resolutions.push({ argv, init });
-        if (options.resolveProcess) return options.resolveProcess(argv, init);
-        const request = JSON.parse(init.stdin);
-        return { exitCode: 0, stderr: '', stdout: JSON.stringify({ status: 'resolved',
-          models: Object.fromEntries(request.aliases.map(alias => [alias, CANONICAL[alias]])) }) };
-      }
       calls.processes.push({ argv, init });
       if (options.process) return options.process(argv, init);
-      const request = JSON.parse(init.stdin);
-      const scope = Object.keys(request.decisions)[0];
-      return { exitCode: 0, stderr: '', stdout: JSON.stringify({
-        status: 'recommended', decisions: { [scope]: {
-          choice: options.choice ?? (scope === 'task' ? CANONICAL.haiku : 'haiku'), confidence: 0.9,
-        } },
-      }) };
+      return { exitCode: 0, stderr: '', stdout: JSON.stringify({ status: 'recommended',
+        decisions: { subagent: { choice: options.choice ?? 'haiku', confidence: 0.9 } } }) };
     } },
   };
   register((name, matcher, hook) => {
     if (typeof matcher === 'function') hook = matcher;
-    assert.ok(!hooks.has(name));
-    hooks.set(name, hook);
-    return { catch() {} };
+    assert.ok(!hooks.has(name)); hooks.set(name, hook); return { catch() {} };
   });
   let started = false;
   const event = (name, e, next = async input => input) => {
     if (name === 'session.start') started = true;
     if (name === 'session.end') started = false;
-    return hooks.get(name)($, e, next);
+    return hooks.has(name) ? hooks.get(name)($, e, next) : next(e);
   };
   const command = async (args, origin = 'composer', name = 'jev') => {
     if (!started) await event('session.start', {});
     return event('command.run', { command: name, args, origin: { kind: origin } });
   };
-  return { $, calls, event, command, rows: value => { rows = value; }, key: value => { key = value; } };
+  return { $, hooks, calls, event, command, rows: value => { rows = value; }, key: value => { key = value; } };
 }
 
-async function stream(h, e, result = { usage: { model: 'claude-haiku-4-5' } }, fail) {
-  const received = [], chunks = [{ kind: 'text', text: 'one' }, { kind: 'engine', ref: 3 }];
-  let count = 0;
-  const generator = h.event('turn.step', e, async function* (input) {
-    count++; received.push(input);
-    yield* chunks;
-    if (fail) throw fail;
-    return result;
-  });
-  const emitted = [];
-  let item;
-  do {
-    item = await generator.next();
-    if (!item.done) emitted.push(item.value);
-  } while (!item.done);
-  return { received, emitted, count, result: item.value, chunks };
+function child(id = 'spawn-1', extra = {}) {
+  return { tool_use_id: id, prompt: 'Review a concurrent change', description: 'Inspect',
+    parentModel: 'sonnet', subagentType: 'Explore', fork: false, ...extra };
 }
 
-test('session registers a native command and starts with all routing off', async () => {
+async function spawn(h, e = child(), actual = 'claude-haiku-test') {
+  let input, count = 0;
+  const output = { model: actual, agentId: 'child-id' };
+  const result = await h.event('agent.spawn', e, async value => { input = value; count++; return output; });
+  assert.equal(result, output); assert.equal(count, 1);
+  return input;
+}
+
+const allOff = /skill=off subagent=off/;
+const allOn = /skill=on subagent=on/;
+
+test('native session registers controls with all decisions off and no API access', async () => {
   const h = host();
   await h.event('session.start', {});
   assert.equal(h.calls.commands[0].name, 'jev');
-  const status = await h.command('status');
-  assert.match(status.text, /task=off skill=off subagent=off/);
-  assert.equal(h.calls.env, 0);
+  assert.match(h.calls.commands[0].argumentHint, /skill subagent/);
+  assert.ok(!h.calls.commands[0].argumentHint.includes('task'));
+  assert.match((await h.command('status')).text, allOff);
+  assert.equal(h.calls.env, 0); assert.equal(h.calls.processes.length, 0);
+});
+
+test('bare on and on all enable both supported decisions', async () => {
+  for (const args of ['on', 'on all', 'on skill subagent']) {
+    const h = host();
+    assert.match((await h.command(args)).text, allOn);
+    assert.equal(h.calls.processes.length, 0);
+    await h.command('off skill');
+    assert.match((await h.command('status')).text, /skill=off subagent=on/);
+    await h.command('off subagent');
+    assert.match((await h.command('')).text, allOff);
+    await h.command('on');
+    await h.command('off all');
+    assert.match((await h.command('status')).text, allOff);
+  }
+});
+
+test('task controls and invalid arguments leave flags unchanged', async () => {
+  const h = host();
+  await h.command('on skill');
+  const envReads = h.calls.env;
+  for (const args of ['on task', 'off task', 'on skill task', 'off task skill', 'status task', 'on all skill', 'enable']) {
+    assert.match((await h.command(args)).text, /Usage/);
+    assert.match((await h.command('status')).text, /skill=on subagent=off/);
+  }
+  assert.equal(h.calls.env, envReads);
   assert.equal(h.calls.processes.length, 0);
 });
 
-test('an installed Jev skill is reused without a conflicting native registration', async () => {
-  for (const command of [
-    { name: 'jev', source: 'user', description: 'Jev routing for task models, skills, and subagent models.' },
-    { name: 'jev', source: 'user', description: 'Jev routing for task models, skills, and subagent models. Use to configure routing.' },
-    { name: 'jev', source: 'plugin', plugin: 'shuaigle', description: 'Jev' },
-  ]) {
-    const h = host({ commands: [command] });
-    assert.match((await h.command('on task')).text, /task=on/);
-    assert.equal(h.calls.commands.length, 0);
-  }
-});
-
-test('an unrelated /jev command is preserved while /shuaigle:jev controls routing', async () => {
-  const h = host({ commands: [{ name: 'jev', source: 'user', description: 'Manage my journal entries' }] });
-  await h.event('session.start', {});
-  let count = 0;
-  const event = { command: 'jev', args: 'on all', origin: { kind: 'composer' } };
-  const result = { text: 'Existing command output' };
-  assert.equal(await h.event('command.run', event, async input => {
-    count++; assert.equal(input, event); return result;
-  }), result);
-  assert.equal(count, 1);
-  assert.equal(h.calls.commands.length, 0);
-  assert.equal(h.calls.env, 0);
-  assert.ok(h.calls.logs.some(text => text.includes('/shuaigle:jev')));
-  assert.match((await h.command('status', 'composer', 'shuaigle:jev')).text, /task=off skill=off subagent=off/);
-  assert.match((await h.command('on task', 'composer', 'shuaigle:jev')).text, /task=on/);
-});
-
-test('all seven enabled combinations and off scopes use session state', async () => {
-  const names = ['task', 'skill', 'subagent'];
-  for (let mask = 1; mask < 8; mask++) {
-    const h = host();
-    const chosen = names.filter((_, index) => mask & (1 << index));
-    const result = await h.command(`on ${chosen.join(' ')}`);
-    for (const name of names) assert.ok(result.text.includes(`${name}=${chosen.includes(name) ? 'on' : 'off'}`));
-    await h.command('off');
-    assert.match((await h.command('')).text, /task=off skill=off subagent=off/);
-    assert.equal(h.calls.processes.length, 0);
-  }
+test('a missing key preserves enabled decisions and prints no key value', async () => {
   const h = host();
-  await h.command('on');
-  assert.match((await h.command('status')).text, /task=on skill=off subagent=off/);
-  await h.command('on all');
-  await h.command('off task skill');
-  assert.match((await h.command('status')).text, /task=off skill=off subagent=on/);
-  await h.command('off all');
-  assert.match((await h.command('status')).text, /task=off skill=off subagent=off/);
-});
-
-test('missing key and invalid controls preserve existing flags without leaking values', async () => {
-  const h = host();
-  await h.command('on skill');
-  h.key('');
-  assert.match((await h.command('on task')).text, /JEV_API_KEY/);
-  assert.match((await h.command('status')).text, /task=off skill=on subagent=off/);
-  const before = h.calls.env;
-  for (const args of ['on bogus', 'off task bogus', 'status task', 'enable', 'on all task']) {
-    assert.match((await h.command(args)).text, /Usage/);
-    assert.match((await h.command('status')).text, /task=off skill=on subagent=off/);
-  }
-  assert.equal(h.calls.env, before);
+  await h.command('on skill'); h.key('');
+  assert.match((await h.command('on subagent')).text, /JEV_API_KEY/);
+  assert.match((await h.command('status')).text, /skill=on subagent=off/);
   assert.ok(!JSON.stringify(h.calls.logs).includes('synthetic-test-key'));
 });
 
-test('only explicit user command origins may change flags', async () => {
+test('only explicit human-origin commands can enable or disable routing', async () => {
   const h = host();
   for (const origin of ['plugin', 'peer', 'scheduled-trigger', 'observer', 'unclassified']) {
-    const result = await h.command('on all', origin);
-    assert.match(result.text, /user command/);
+    assert.match((await h.command('on all', origin)).text, /user command/);
+    assert.match((await h.command('status')).text, allOff);
   }
   for (const origin of ['composer', 'bridge', 'sdk']) {
-    await h.command('on task', origin, 'shuaigle:jev');
-    assert.match((await h.command('status')).text, /task=on/);
+    assert.match((await h.command('on', origin, 'shuaigle:jev')).text, allOn);
+    assert.match((await h.command('off', 'plugin')).text, /user command/);
+    assert.match((await h.command('status')).text, allOn);
     await h.command('off');
   }
   assert.equal(h.calls.env, 3);
 });
 
-test('sessions remain isolated and session end clears choices and flags', async () => {
-  const a = host(), b = host();
-  await a.command('on all');
-  await a.event('turn.start', { turnId: 'a', text: 'Review changes' });
-  assert.match((await b.command('status')).text, /task=off skill=off subagent=off/);
-  await a.event('session.end', {});
-  assert.match((await a.command('status')).text, /task=off skill=off subagent=off/);
-  const result = await stream(a, { turnId: 'a', model: 'sonnet', index: 1 });
-  assert.equal(result.received[0].model, 'sonnet');
+test('installed new and old Jev skills reuse the command without conflicting registration', async () => {
+  for (const entry of [
+    { name: 'jev', source: 'user', description: 'Jev routing for optional skills and subagent models.' },
+    { name: 'jev', source: 'user', description: 'Jev routing for task models, skills, and subagent models.' },
+    { name: 'jev', source: 'plugin', plugin: 'shuaigle', description: 'Jev' },
+  ]) {
+    const h = host({ commands: [entry] });
+    assert.match((await h.command('on subagent')).text, /subagent=on/);
+    assert.equal(h.calls.commands.length, 0);
+    assert.match((await h.command('on task')).text, /Usage/);
+  }
 });
 
-test('disabled routing and skill-only routing make no model API calls', async () => {
+test('an unrelated bare command is preserved while namespaced controls remain available', async () => {
+  const h = host({ commands: [{ name: 'jev', source: 'user', description: 'Manage journal entries' }] });
+  await h.event('session.start', {});
+  const e = { command: 'jev', args: 'on all', origin: { kind: 'composer' } };
+  const output = { text: 'Existing output' }; let count = 0;
+  assert.equal(await h.event('command.run', e, async input => { count++; assert.equal(input, e); return output; }), output);
+  assert.equal(count, 1); assert.equal(h.calls.env, 0); assert.equal(h.calls.commands.length, 0);
+  assert.ok(h.calls.logs.some(text => text.includes('/shuaigle:jev')));
+  assert.match((await h.command('status', 'composer', 'shuaigle:jev')).text, allOff);
+  assert.match((await h.command('on', 'composer', 'shuaigle:jev')).text, allOn);
+});
+
+test('all-off and skill-only native behavior make no model requests', async () => {
   const h = host();
-  await h.event('turn.start', { turnId: 'a', text: 'Implement this' });
-  await h.event('agent.spawn', { prompt: 'Test', fork: false });
+  await h.event('session.start', {});
+  const e = child(); assert.equal(await spawn(h, e, 'sonnet'), e);
   await h.command('on skill');
-  await h.event('turn.start', { turnId: 'b', text: 'Implement this' });
-  await h.event('agent.spawn', { prompt: 'Test', fork: false });
+  assert.equal(await spawn(h, child('skill-only'), 'sonnet').then(value => value.model), undefined);
+  const submitted = { text: 'Read and summarize', context: ['existing'] };
+  const prompt = await h.event('prompt.submit', submitted);
+  assert.equal(prompt.text, submitted.text); assert.equal(prompt.context[0], 'existing');
+  assert.match(prompt.context[1], /skill=on subagent=off/);
+  assert.match(prompt.context[1], /zero or more optional skills once per/);
+  assert.match(prompt.context[1], /including failures.*continuations/);
+  assert.match(prompt.context[1], /mandatory skill rules/);
   assert.equal(h.calls.processes.length, 0);
-  const prompt = await h.event('prompt.submit', { text: 'Test', context: ['existing'] });
-  assert.equal(prompt.context[0], 'existing');
-  assert.match(prompt.context[1], /skill=on/);
-  assert.match(prompt.context[1], /handled natively/);
-  assert.match(prompt.context[1], /mandatory/);
 });
 
-test('candidate inventory uses current native options and excludes modes and private ids', () => {
+test('combined skill and subagent routing uses one agent-prepared batch without a native request', async () => {
+  const h = host(); await h.command('on');
+  const prepared = child('prepared', { model: 'haiku', prompt: 'Review; prepared skills: testing, security' });
+  assert.equal(await spawn(h, prepared), prepared);
+  const fallback = child('fallback');
+  assert.equal(await spawn(h, fallback, 'sonnet'), fallback);
+  assert.equal(await spawn(h, { ...fallback }, 'sonnet').then(value => value.model), undefined);
+  assert.equal(h.calls.processes.length, 0); assert.equal(h.calls.configs, 0);
+  assert.equal(h.calls.logs.filter(text => text.includes('unset model keeps inheritance')).length, 1);
+  const prompt = await h.event('prompt.submit', { text: 'Continue the child work' });
+  assert.match(prompt.context[0], /one combined Jev batch per child unit/);
+  assert.match(prompt.context[0], /native hook never reroutes this combined path/);
+  await h.command('off skill');
+  assert.equal(await spawn(h, fallback, 'sonnet'), fallback);
+  assert.equal(h.calls.processes.length, 0);
+  assert.equal((await spawn(h, child('new-native-child'))).model, 'haiku');
+  assert.equal(h.calls.processes.length, 1);
+});
+
+test('main-turn events have no routing hooks and keep the model and dispatch unchanged', async () => {
+  const h = host(); await h.command('on');
+  for (const name of ['turn.start', 'turn.step', 'turn.complete']) {
+    assert.equal(h.hooks.has(name), false);
+    const e = { turnId: 'main', text: 'Use another model', model: 'opus', effort: 'max' };
+    const got = await h.event(name, e);
+    assert.equal(got, e); assert.equal(got.model, 'opus'); assert.equal(got.effort, 'max');
+  }
+  assert.equal(h.calls.processes.length, 0); assert.equal(h.calls.configs, 0);
+});
+
+test('one stable spawn routes once and reuses its choice through repeated dispatches', async () => {
+  const h = host(); await h.command('on subagent');
+  const e = child();
+  assert.equal((await spawn(h, e)).model, 'haiku');
+  assert.equal((await spawn(h, { ...e })).model, 'haiku');
+  assert.equal(h.calls.processes.length, 1); assert.equal(h.calls.configs, 1);
+  assert.equal(h.calls.logs.filter(text => text.includes('actual=claude-haiku-test')).length, 1);
+  const call = h.calls.processes[0];
+  assert.deepEqual(call.argv, ['python3', '/test/plugin/skills/jev/scripts/route.py']);
+  assert.equal(call.init.timeoutMs, 17000); assert.equal(call.init.env, undefined);
+  const request = JSON.parse(call.init.stdin);
+  assert.deepEqual(Object.keys(request.decisions), ['subagent']);
+  assert.equal(request.current_model, undefined); assert.equal(request.models, undefined);
+  assert.ok(!call.init.stdin.includes(e.prompt));
+});
+
+test('concurrent dispatches of one spawn share the in-flight routing promise', async () => {
+  let resolve;
+  const pending = new Promise(done => { resolve = done; });
+  const h = host({ process: async () => pending }); await h.command('on subagent');
+  const a = spawn(h, child()), b = spawn(h, child());
+  await new Promise(done => setImmediate(done));
+  assert.equal(h.calls.processes.length, 1);
+  resolve({ exitCode: 0, stdout: JSON.stringify({ status: 'recommended', decisions: {
+    subagent: { choice: 'haiku', confidence: 0.9 } } }), stderr: '' });
+  assert.equal((await a).model, 'haiku'); assert.equal((await b).model, 'haiku');
+});
+
+test('separate spawn identities route separately even with identical prompts', async () => {
+  const h = host(); await h.command('on subagent');
+  await spawn(h, child('one')); await spawn(h, child('two'));
+  await spawn(h, child('one', { parentAgentId: 'another-parent' }));
+  assert.equal(h.calls.processes.length, 3);
+});
+
+test('continuing an existing child has no new spawn routing event', async () => {
+  const h = host(); await h.command('on subagent'); await spawn(h);
+  const followup = { tool: 'SendMessage', tool_use_id: 'followup',
+    input: { to: 'child-id', message: 'Continue inspecting' } };
+  assert.equal(await h.event('tool.call', followup), followup);
+  assert.equal(h.calls.processes.length, 1);
+});
+
+test('failed routing is cached and keeps inheritance on repeated dispatch of the same spawn', async () => {
+  const h = host({ process: async () => { throw new Error('private secret /private/path'); } });
+  await h.command('on subagent'); const e = child();
+  assert.equal(await spawn(h, e, 'sonnet'), e);
+  assert.equal(await spawn(h, { ...e }, 'sonnet').then(value => value.model), undefined);
+  assert.equal(h.calls.processes.length, 1);
+  assert.equal(h.calls.logs.filter(text => text.includes('routing failed')).length, 1);
+  assert.ok(!JSON.stringify(h.calls.logs).includes('private secret'));
+  assert.ok(!JSON.stringify(h.calls.logs).includes('/private/path'));
+});
+
+test('missing-key fallback is remembered even if the key becomes available later', async () => {
+  const h = host(); await h.command('on subagent'); h.key('');
+  await spawn(h, child(), 'sonnet'); h.key('new-synthetic-key');
+  await spawn(h, child(), 'sonnet'); assert.equal(h.calls.processes.length, 0);
+  await spawn(h, child('new-child')); assert.equal(h.calls.processes.length, 1);
+});
+
+test('invalid recommendations fail once without leaking output or dispatching another spawn', async () => {
+  for (const process of [
+    async () => ({ exitCode: 1, stdout: 'secret-output', stderr: 'private-error' }),
+    async () => ({ exitCode: 0, stdout: 'invalid JSON', stderr: '' }),
+    async () => ({ exitCode: 0, stdout: JSON.stringify({ status: 'recommended', decisions: {
+      subagent: { choice: 'private/model', confidence: 1 } } }), stderr: '' }),
+  ]) {
+    const h = host({ process }); await h.command('on subagent');
+    await spawn(h, child(), 'sonnet'); await spawn(h, child(), 'sonnet');
+    assert.equal(h.calls.processes.length, 1);
+    assert.ok(!JSON.stringify(h.calls.logs).includes('secret-output'));
+    assert.ok(!JSON.stringify(h.calls.logs).includes('private-error'));
+  }
+});
+
+test('downstream spawn errors propagate once and retain the already consumed route', async () => {
+  const h = host(); await h.command('on subagent'); let count = 0;
+  const error = new Error('host rejected spawn');
+  await assert.rejects(h.event('agent.spawn', child(), async () => { count++; throw error; }), error);
+  assert.equal(count, 1); assert.equal(h.calls.processes.length, 1);
+  assert.equal((await spawn(h)).model, 'haiku'); assert.equal(h.calls.processes.length, 1);
+});
+
+test('explicit child models and forks preserve host inputs without a Jev request', async () => {
+  const h = host(); await h.command('on subagent');
+  for (const e of [child('explicit', { model: 'opus' }), child('fork', { fork: true })]) {
+    assert.equal(await spawn(h, e, 'opus'), e);
+  }
+  assert.equal(h.calls.processes.length, 0);
+  assert.ok(h.calls.logs.some(text => text.includes('fork inherits')));
+});
+
+test('missing stable IDs report the limitation and route each event once without merging by prompt', async () => {
+  const h = host(); await h.command('on subagent');
+  const e = child(undefined, { tool_use_id: undefined });
+  await spawn(h, e); await spawn(h, e);
+  assert.equal(h.calls.processes.length, 2);
+  assert.ok(h.calls.logs.some(text => text.includes('no stable spawn ID')));
+});
+
+test('disabling routing skips cached choices and reenabling does not retry consumed routing', async () => {
+  const h = host(); await h.command('on subagent'); await spawn(h);
+  await h.command('off'); const e = child();
+  assert.equal(await spawn(h, e, 'sonnet'), e);
+  await h.command('on subagent'); assert.equal((await spawn(h, e)).model, 'haiku');
+  assert.equal(h.calls.processes.length, 1);
+});
+
+test('session state is isolated and end clears flags and cached routing', async () => {
+  const a = host(), b = host(); await a.command('on subagent'); await spawn(a);
+  assert.match((await b.command('status')).text, allOff);
+  await a.event('session.end', {});
+  assert.match((await a.command('status')).text, allOff);
+  await a.command('on subagent'); await spawn(a);
+  assert.equal(a.calls.processes.length, 2);
+});
+
+test('live inventory filters virtual modes, context suffixes, duplicates and private IDs', () => {
   const candidates = modelCandidates([{ key: 'model', kind: 'choice', isLocked: false,
     options: ['default', 'sonnet', 'opus', 'haiku', 'fable', 'best', 'opusplan', 'sonnet[1m]',
-      'claude-opus-4-6', 'arn:aws:private', '/private/model', 'custom/name', 'sonnet'] }]);
-  assert.deepEqual(candidates.map(item => item.id), ['sonnet', 'opus', 'haiku', 'fable', 'claude-opus-4-6']);
+      'claude-opus-test', 'arn:aws:private', '/private/model', 'custom/name', 'sonnet'] }]);
+  assert.deepEqual(candidates.map(item => item.id), ['sonnet', 'opus', 'haiku', 'fable', 'claude-opus-test']);
   assert.deepEqual(modelCandidates([{ key: 'model', kind: 'choice', isLocked: true, options: ['sonnet'] }]), []);
   assert.deepEqual(modelCandidates([{ key: 'model', kind: 'text', options: ['sonnet'] }]), []);
 });
 
-test('feature summary never copies prompt text, paths, code, or secret strings', () => {
-  const text = 'Review a complex concurrent payment upload with images. /private/project/client.js '
-    + 'token-secret-xyz function privateAlgorithm() { return "secret"; }';
-  const summary = summarizeTask(text);
-  assert.match(summary, /review/);
-  assert.match(summary, /concurrency/);
-  assert.match(summary, /payments/);
-  for (const value of ['token-secret-xyz', '/private/project', 'privateAlgorithm', 'client.js', text]) {
+test('locked, absent or restricted inventory falls back without API and is not retried for that spawn', async () => {
+  for (const options of [{ rows: [] }, { settings: { availableModels: [] } },
+    { rows: [{ key: 'model', kind: 'choice', isLocked: true, options: ['haiku'] }] }]) {
+    const h = host(options); await h.command('on subagent');
+    await spawn(h, child(), 'sonnet'); await spawn(h, child(), 'sonnet');
+    assert.equal(h.calls.processes.length, 0); assert.equal(h.calls.configs, 1);
+    assert.ok(h.calls.logs.some(text => /unavailable|locked/.test(text)));
+  }
+  const h = host({ settings: { availableModels: ['haiku'] } }); await h.command('on subagent'); await spawn(h);
+  assert.deepEqual(JSON.parse(h.calls.processes[0].init.stdin).decisions.subagent.map(item => item.id), ['haiku']);
+});
+
+test('each independent spawn reads fresh candidates without rerouting earlier units', async () => {
+  const h = host(); await h.command('on subagent'); await spawn(h, child('one'));
+  h.rows([{ key: 'model', kind: 'choice', isLocked: false, options: ['haiku'] }]);
+  await spawn(h, child('two')); await spawn(h, child('one'));
+  assert.equal(h.calls.configs, 2);
+  assert.deepEqual(JSON.parse(h.calls.processes[1].init.stdin).decisions.subagent.map(item => item.id), ['haiku']);
+});
+
+test('feature summaries contain no source text, code, secret values or private paths', () => {
+  const source = 'Review a complex concurrent payment upload with images /private/project/file.js '
+    + 'test-env-secret function privateAlgorithm() { return "secret"; }';
+  const summary = summarizeTask(source);
+  assert.match(summary, /review/); assert.match(summary, /concurrency/); assert.match(summary, /payments/);
+  for (const value of ['test-env-secret', '/private/project', 'privateAlgorithm', 'file.js', source]) {
     assert.ok(!summary.includes(value));
   }
-  assert.deepEqual(JSON.parse(summary).categories, ['review']);
-});
-
-test('a user turn routes once and every main step preserves its choice, chunks and result', async () => {
-  const h = host();
-  await h.command('on task');
-  await h.event('turn.start', { turnId: 'a', text: 'Review changes' });
-  await h.event('turn.start', { turnId: 'a', text: 'Review changes' });
-  const result = { usage: { model: 'claude-haiku-4-5' }, answer: 'OK' };
-  for (const index of [0, 1, 2]) {
-    const got = await stream(h, { turnId: 'a', model: 'opus', effort: 'high', index }, result);
-    assert.equal(got.received[0].model, CANONICAL.haiku);
-    assert.equal(got.received[0].effort, 'high');
-    assert.deepEqual(got.emitted, got.chunks);
-    assert.equal(got.result, result);
-    assert.equal(got.count, 1);
-  }
-  assert.equal(h.calls.processes.length, 1);
-  assert.equal(h.calls.resolutions.length, 1);
-  assert.deepEqual(JSON.parse(h.calls.resolutions[0].init.stdin), {
-    aliases: ['sonnet', 'opus', 'haiku'], expected_version: '2.1.296',
-  });
-  assert.equal(h.calls.resolutions[0].init.timeoutMs, 6000);
-  assert.equal(h.calls.logs.filter(line => line.includes('actual=claude-haiku-4-5')).length, 1);
-  assert.ok(!h.calls.logs.some(line => /picker|default changed|session switched/.test(line)));
-  const call = h.calls.processes[0];
-  assert.deepEqual(call.argv, ['python3', '/test/plugin/skills/jev/scripts/route.py']);
-  assert.equal(call.init.timeoutMs, 17000);
-  assert.equal(call.init.env, undefined);
-  assert.equal(call.init.stdin.includes('Review changes'), false);
-  assert.deepEqual(Object.keys(JSON.parse(call.init.stdin).decisions), ['task']);
-});
-
-test('task aliases fail closed on resolver errors or unsafe IDs before calling Jev', async () => {
-  for (const resolveProcess of [
-    async () => { throw new Error('private secret'); },
-    async () => ({ exitCode: 1, stdout: 'private secret', stderr: '' }),
-    async () => ({ exitCode: 0, stdout: 'invalid JSON', stderr: '' }),
-    async () => ({ exitCode: 0, stdout: JSON.stringify({ status: 'resolved',
-      models: { haiku: 'haiku', sonnet: 'arn:aws:private', opus: '/private/model' } }), stderr: '' }),
-  ]) {
-    const h = host({ resolveProcess });
-    await h.command('on task');
-    await h.event('turn.start', { turnId: 'a', text: 'Review' });
-    assert.equal((await stream(h, { turnId: 'a', model: 'sonnet' })).received[0].model, 'sonnet');
-    assert.equal(h.calls.processes.length, 0);
-    assert.ok(!JSON.stringify(h.calls.logs).includes('private secret'));
-  }
-});
-
-test('canonical offered task models need no resolver and partial mappings omit unresolved aliases', async () => {
-  const rows = [{ key: 'model', kind: 'choice', isLocked: false, options: [CANONICAL.haiku] }];
-  const h = host({ rows });
-  await h.command('on task');
-  await h.event('turn.start', { turnId: 'a', text: 'Review' });
-  assert.equal(h.calls.resolutions.length, 0);
-  assert.equal((await stream(h, { turnId: 'a', model: 'opus' })).received[0].model, CANONICAL.haiku);
-  const partial = host({ resolveProcess: async () => ({ exitCode: 0, stderr: '',
-    stdout: JSON.stringify({ status: 'resolved', models: { haiku: CANONICAL.haiku } }) }) });
-  await partial.command('on task');
-  await partial.event('turn.start', { turnId: 'a', text: 'Review' });
-  const choices = JSON.parse(partial.calls.processes[0].init.stdin).decisions.task;
-  assert.deepEqual(choices.map(item => item.id), [CANONICAL.haiku]);
-  assert.ok(!JSON.stringify(choices).includes('"id":"haiku"'));
-  const mixed = host({ rows: [{ ...rows[0], options: [CANONICAL.haiku, 'sonnet'] }],
-    resolveProcess: async () => { throw new Error('resolver unavailable'); } });
-  await mixed.command('on task');
-  await mixed.event('turn.start', { turnId: 'a', text: 'Review' });
-  assert.equal((await stream(mixed, { turnId: 'a', model: 'opus' })).received[0].model, CANONICAL.haiku);
-  assert.deepEqual(JSON.parse(mixed.calls.processes[0].init.stdin).decisions.task.map(item => item.id),
-    [CANONICAL.haiku]);
-});
-
-test('an unresolved explicit task alias keeps the host model instead of choosing another one', async () => {
-  const h = host({ resolveProcess: async () => ({ exitCode: 0, stderr: '',
-    stdout: JSON.stringify({ status: 'resolved', models: { haiku: CANONICAL.haiku } }) }) });
-  await h.command('on task');
-  await h.event('turn.start', { turnId: 'a', text: 'Use sonnet for this task: Review' });
-  assert.equal((await stream(h, { turnId: 'a', model: 'opus' })).received[0].model, 'opus');
-  assert.equal(h.calls.processes.length, 0);
-});
-
-test('each new turn gets live candidates and continuations reuse the latest successful choice', async () => {
-  const h = host();
-  await h.command('on task');
-  await h.event('turn.start', { turnId: 'a', text: 'Review' });
-  await h.event('turn.complete', { turnId: 'a' });
-  await h.event('turn.start', { turnId: 'continuation', text: '' });
-  assert.equal((await stream(h, { turnId: 'continuation', model: 'opus' })).received[0].model, CANONICAL.haiku);
-  assert.equal(h.calls.processes.length, 1);
-  h.rows([{ key: 'model', kind: 'choice', isLocked: false, options: ['opus', 'haiku'] }]);
-  await h.event('turn.start', { turnId: 'b', text: 'Debug' });
-  assert.equal(h.calls.configs, 2);
-  const latest = JSON.parse(h.calls.processes[1].init.stdin);
-  assert.deepEqual(latest.decisions.task.map(item => item.id), [CANONICAL.opus, CANONICAL.haiku]);
-});
-
-test('locked or unavailable models fall back visibly without an API request', async () => {
-  for (const rows of [[], [{ key: 'model', kind: 'choice', isLocked: true, options: ['haiku'] }]]) {
-    const h = host({ rows });
-    await h.command('on task');
-    await h.event('turn.start', { turnId: 'a', text: 'Review' });
-    const got = await stream(h, { turnId: 'a', model: 'sonnet' });
-    assert.equal(got.received[0].model, 'sonnet');
-    assert.equal(h.calls.processes.length, 0);
-    assert.ok(h.calls.logs.some(line => /unavailable|locked/.test(line)));
-  }
-});
-
-test('effective availableModels restricts the live inventory without resolving unlisted aliases', async () => {
-  const h = host({ settings: { availableModels: ['haiku'] } });
-  await h.command('on task');
-  await h.event('turn.start', { turnId: 'a', text: 'Review' });
-  const request = JSON.parse(h.calls.processes[0].init.stdin);
-  assert.deepEqual(request.decisions.task.map(item => item.id), [CANONICAL.haiku]);
-  for (const availableModels of [[], ['claude-haiku-4-5'], 'haiku']) {
-    const denied = host({ settings: { availableModels } });
-    await denied.command('on task');
-    await denied.event('turn.start', { turnId: 'a', text: 'Review' });
-    assert.equal(denied.calls.processes.length, 0);
-    assert.equal((await stream(denied, { turnId: 'a', model: 'sonnet' })).received[0].model, 'sonnet');
-  }
-});
-
-test('unambiguous user task model clauses win without Jev, even if its key later disappears', async () => {
-  for (const text of ['Use sonnet for this task: Review changes', '這個任務使用 sonnet：檢視改動']) {
-    const h = host();
-    await h.command('on task');
-    h.key('');
-    await h.event('turn.start', { turnId: 'a', text });
-    assert.equal((await stream(h, { turnId: 'a', model: 'opus' })).received[0].model, CANONICAL.sonnet);
-    assert.equal(h.calls.processes.length, 0);
-  }
-  for (const text of ['Review sonnet output', 'Use sonnet for this tasking example']) {
-    const h = host();
-    await h.command('on task');
-    await h.event('turn.start', { turnId: 'a', text });
-    assert.equal((await stream(h, { turnId: 'a', model: 'opus' })).received[0].model, CANONICAL.haiku);
-    assert.equal(h.calls.processes.length, 1);
-  }
-});
-
-test('subagent model selection routes only the existing planned child', async () => {
-  const h = host();
-  await h.command('on subagent');
-  let count = 0, input;
-  const spawn = { prompt: 'Debug concurrent failure /private/repo', description: 'Investigate',
-    parentModel: 'opus', fork: false, tool_use_id: 't1', subagentType: 'Explore' };
-  const result = { model: 'claude-haiku-4-5', agentId: 'child-1' };
-  assert.equal(await h.event('agent.spawn', spawn, async e => { count++; input = e; return result; }), result);
-  assert.equal(count, 1);
-  assert.equal(input.model, 'haiku');
-  assert.equal(input.prompt, spawn.prompt);
-  assert.equal(input.subagentType, 'Explore');
-  const request = JSON.parse(h.calls.processes[0].init.stdin);
-  assert.deepEqual(Object.keys(request.decisions), ['subagent']);
-  assert.match(request.task, /debug/);
-  assert.ok(!request.task.includes('/private/repo'));
-  assert.ok(h.calls.logs.some(line => line.includes('actual=claude-haiku-4-5')));
-});
-
-test('explicit child models and forks preserve their host inputs without routing', async () => {
-  const h = host();
-  await h.command('on subagent');
-  for (const input of [{ prompt: 'Review', model: 'sonnet', fork: false }, { prompt: 'Review', fork: true }]) {
-    let got;
-    await h.event('agent.spawn', input, async e => { got = e; return { model: 'sonnet' }; });
-    assert.equal(got, input);
-  }
-  assert.equal(h.calls.processes.length, 0);
-  assert.ok(h.calls.logs.some(line => /fork/.test(line)));
-});
-
-test('main task routing never overrides child loop steps', async () => {
-  const h = host();
-  await h.command('on task');
-  await h.event('turn.start', { turnId: 'a', text: 'Review' });
-  const got = await stream(h, { turnId: 'a', model: 'sonnet', agentId: 'child' });
-  assert.equal(got.received[0].model, 'sonnet');
-});
-
-test('process failures and invalid recommendations dispatch original event exactly once', async () => {
-  for (const process of [
-    async () => { throw new Error('secret-token /private/path'); },
-    async () => ({ exitCode: 1, stdout: 'secret-token', stderr: '/private/path' }),
-    async () => ({ exitCode: 0, stdout: 'not json', stderr: '' }),
-    async () => ({ exitCode: 0, stdout: JSON.stringify({ status: 'recommended', decisions: {
-      task: { choice: 'private/model', confidence: 1 }, subagent: { choice: 'private/model', confidence: 1 },
-    } }), stderr: '' }),
-  ]) {
-    const h = host({ process });
-    await h.command('on task subagent');
-    await h.event('turn.start', { turnId: 'a', text: 'Review' });
-    const got = await stream(h, { turnId: 'a', model: 'sonnet' });
-    assert.equal(got.received[0].model, 'sonnet');
-    assert.equal(got.count, 1);
-    let count = 0;
-    const spawn = { prompt: 'Review', fork: false };
-    await h.event('agent.spawn', spawn, async input => { count++; assert.equal(input, spawn); });
-    assert.equal(count, 1);
-    assert.ok(!JSON.stringify(h.calls.logs).includes('secret-token'));
-    assert.ok(!JSON.stringify(h.calls.logs).includes('/private/path'));
-  }
-});
-
-test('downstream inference and spawn errors propagate without replay', async () => {
-  const h = host();
-  await h.command('on task subagent');
-  await h.event('turn.start', { turnId: 'a', text: 'Review' });
-  let requests = 0;
-  const error = new Error('host request failed');
-  const generator = h.event('turn.step', { turnId: 'a', model: 'sonnet' }, async function* () {
-    requests++; throw error;
-  });
-  await assert.rejects(generator.next(), error);
-  assert.equal(requests, 1);
-  let spawns = 0;
-  await assert.rejects(h.event('agent.spawn', { prompt: 'Review', fork: false }, async () => {
-    spawns++; throw error;
-  }), error);
-  assert.equal(spawns, 1);
-});
-
-test('turning task routing off clears pending overrides and continuation choices', async () => {
-  const h = host();
-  await h.command('on task');
-  await h.event('turn.start', { turnId: 'a', text: 'Review' });
-  await h.command('off task');
-  assert.equal((await stream(h, { turnId: 'a', model: 'sonnet' })).received[0].model, 'sonnet');
-  await h.command('on task');
-  await h.event('turn.start', { turnId: 'continuation', text: '' });
-  assert.equal((await stream(h, { turnId: 'continuation', model: 'sonnet' })).received[0].model, 'sonnet');
-  assert.equal(h.calls.processes.length, 1);
 });

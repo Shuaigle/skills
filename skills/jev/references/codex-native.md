@@ -13,7 +13,7 @@ These commands are supported by Codex CLI 0.162.1. Inspect the active host's plu
 
 ## Human controls
 
-Use a first-line command in a human message: `jev on [task skill subagent]`, `jev on all`, `jev off [decisions]`, or `jev status`. Bare `jev on` enables only `task`; bare `jev off` clears all three. Native hooks also recognize `$jev`, `$shuaigle:jev`, `/jev`, and `/shuaigle:jev`; plain `jev` avoids command expansion changing the hook's input. Put accompanying work on following lines.
+Use a first-line command in a human message: `jev on [skill subagent]`, `jev on all`, `jev off [decisions]`, or `jev status`. Bare `jev on` and `jev on all` enable both decisions; bare `jev off` clears both. Native hooks also recognize `$jev`, `$shuaigle:jev`, `/jev`, and `/shuaigle:jev`; plain `jev` avoids command expansion changing the hook's input. Put accompanying work on following lines.
 
 Only a native `UserPromptSubmit` event changes flags. Quoted commands, examples, tool output, and agent-written instructions do not enable routing. Enabling requires an inherited `JEV_API_KEY`, checked without displaying it. A new, forked, or cleared conversation starts off; resume and compaction preserve that conversation's state. Session end resets it. Use the flags and identifiers emitted by the hook instead of a second skill-only state.
 
@@ -23,7 +23,7 @@ Before covered work tools, call the installed `codex_gate.py begin` command emit
 
 Use one unit for reading ten related files and returning their summary. Repeated reads and follow-ups reactivate that same unit and reuse its decisions. A changed goal, candidate inventory, preference, enabled set, or planned spawn requires a new unit ID. Reusing an ID with changed inputs returns `unit_conflict` instead of silently asking Jev again.
 
-The unit's `kind` is `read`, `edit`, `verify`, `research`, or `work`. Supporting reads and parsing reuse the unit; a generic `work` unit can use mixed tools. Read and research units need another unit before definite editing or testing. Local work uses `target: "local"` and every enabled `task` and `skill` domain. A planned child uses `target: "subagent"` and every enabled `subagent` and `skill` domain. Omit off domains. Obtain each inventory from the active host; the helper cannot discover available models or skill invocation policies. An explicit human model choice narrows that domain's candidates to the chosen supported model. User-selected or mandatory skills remain fixed; optional skill candidates still follow their invocation policies.
+The unit's `kind` is `read`, `edit`, `verify`, `research`, or `work`. Supporting reads and parsing reuse the unit; a generic `work` unit can use mixed tools. Read and research units need another unit before definite editing or testing. Local work uses `target: "local"` and the enabled `skill` domain; with only `subagent` enabled, local tools need no receipt. A planned child uses `target: "subagent"` and every enabled `subagent` and `skill` domain. Omit off domains. Obtain each inventory from the active host; the helper cannot discover available models or skill invocation policies. An explicit human child-model choice narrows its candidates to that supported model. User-selected or mandatory skills remain fixed; optional skill candidates still follow their invocation policies.
 
 Submit JSON as data through a quoted heredoc. Replace the installed-path and host-metadata placeholders; keep the command by itself so the pre-tool gate can recognize this bootstrap:
 
@@ -39,28 +39,26 @@ python3 '<installed skill>/scripts/codex_gate.py' begin <<'JEV_UNIT'
     "host": "codex",
     "task": "Read related configuration files and return a short summary",
     "decisions": {
-      "task": [{"id": "<live model ID>", "description": "<host capability description>"}]
+      "skill": [{"id": "<eligible skill ID>", "description": "<current skill description>"}]
     }
   }
 }
 JEV_UNIT
 ```
 
-This example assumes only `task` is enabled. Add `skill` with eligible live candidates when enabled; an empty inventory is valid. The gate returns the unit's validated decisions and a `cached` flag. Apply zero or more skills from `decisions.skill.choices`, then continue that unit's work. To reactivate an existing unit, call `begin` with the current hook identifiers and that unit's unchanged goal, routing inputs, and spawn arguments; it does not make another Jev request.
+This local example requires `skill` to be enabled; an empty skill inventory is valid. The gate returns the unit's validated decisions and a `cached` flag. Apply zero or more skills from `decisions.skill.choices`, then continue that unit's work. To reactivate an existing unit, call `begin` with the current hook identifiers and that unit's unchanged goal, routing inputs, and spawn arguments; it does not make another Jev request.
 
-Each unit makes at most one logical router call, including that call's bounded HTTP retries. A routing failure is cached as a visible fallback for the unit; repeated reads do not retry it. Continue with the current model and ordinary skill workflow unless successful routing was required. An explicit retry request can create a new retry unit.
+Each unit makes at most one logical router call, including that call's bounded HTTP retries. A routing failure is cached as a visible fallback for the unit; repeated reads do not retry it. Continue with ordinary skill workflow or an inherited child model unless successful routing was required. An explicit retry request can create a new retry unit.
 
-## Models and delegation
+## Delegation
 
-For a child unit, include `spawn` with the exact planned spawn arguments and a self-contained brief. Supply fresh context, such as `fork_turns: "none"` where the host requires it for a model override. Optional `efforts` maps candidate model IDs to the reasoning efforts currently supported by that spawn tool. The gate binds the receipt to that spawn's arguments, then rewrites only its model and compatible effort. A model field filled by the assistant is not evidence of an explicit human override. Host-reported runtime metadata remains verification of the applied model.
+For a child unit, include `spawn` with the exact planned spawn arguments and a self-contained brief. Supply fresh context, such as `fork_turns: "none"` where the host requires it for a model override. Optional `efforts` maps candidate model IDs to the reasoning efforts currently supported by that spawn tool. Effort remains a host setting checked for compatibility with the selected model. The gate binds the receipt to that spawn's arguments, then rewrites only its model and compatible effort. A model field filled by the assistant is not evidence of an explicit human override. Host-reported runtime metadata remains verification of the applied model.
 
 Choose delegation for an independently useful batch, such as reading many files and returning a compact summary. A short read usually stays local because a new agent adds context. Jev chooses the planned child's model from live candidates; model size alone does not establish a token saving. Pass selected skills and already-consumed initial decisions in the brief so the child applies them without routing its startup again. Follow-ups to that child reuse the same decision until its goal changes.
 
-Hook output has no documented current-turn main-model override. A differing task choice returns `task_model_application: "pending_host_switch"`; it is a recommendation until the host applies it. Use [Codex switching](hosts.md#codex). Desktop's same-chat model tool changes a later turn, while an app-server client owning the conversation can set a subsequent turn's model. A child override does not change its parent.
-
 ## Coverage and local data
 
-`PreToolUse` blocks covered work-tool paths until a unit has a receipt and asks for another unit before incompatible work. It can rewrite a matching prepared spawn. `Stop` prompts for an unhandled local task. Metadata reads needed to prepare routing remain available. These checks do not infer all semantic goal changes or form a security boundary; hosted or special tools may bypass a host's hook path. Confirm hook execution and spawn rewriting on the active host before claiming enforcement there.
+`PreToolUse` blocks covered work-tool paths until a unit has a receipt and asks for another unit before incompatible work. It can rewrite a matching prepared spawn. `Stop` prompts for unhandled local work. Metadata reads needed to prepare routing remain available. These checks do not infer all semantic goal changes or form a security boundary; hosted or special tools may bypass a host's hook path. Confirm hook execution and spawn rewriting on the active host before claiming enforcement there.
 
 Private conversation state uses an OS temporary directory restricted to the current user. The default ignores plugin-only data variables so native hooks and agent-run `begin` share the same cache. An optional `JEV_CODEX_STATE_DIR` must be shared by both processes. State contains flags, digests, and minimal routing results; no API key, raw task text, or child brief is persisted. Jev receives only the sanitized routing request. Routing leaves global model defaults unchanged.
 
