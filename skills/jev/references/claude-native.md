@@ -16,7 +16,7 @@ The resolver uses `claude` on `PATH` and checks that its version matches the run
 
 Before an existing `agent.spawn`, the mod asks Jev about that child's work and passes the choice in the spawn's `model` field. Native context tells the agent to leave `Agent.model` unset when Jev controls subagents, except for an explicit user choice. A fork inherits its parent and ignores model overrides; a spawn with a model already specified retains that choice. The mod creates no additional agents and leaves permissions unchanged.
 
-`skill` remains an agent-mediated workflow: native context tells the agent to use the Jev skill for optional skill selection only. The mod handles task and subagent models, so the agent must skip duplicate model routing and manual model-switch waits. Mandatory workflows and user-invoked skill restrictions still apply.
+`skill` remains an agent-mediated workflow: native context tells the agent to use the Jev skill to select zero or more optional skills. The mod handles task and subagent models, so the agent must skip duplicate model routing and manual model-switch waits. Mandatory workflows and user-invoked skill restrictions still apply.
 
 ## Data and failure behavior
 

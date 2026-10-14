@@ -50,7 +50,15 @@ def batch_answer(data, selected=None):
     for scope, options in data["decisions"].items():
         ids = [option["id"] for option in options]
         if scope == "skill":
-            ids.append("__none__")
+            selected_skills = (selected or {}).get("skill", ids[:1])
+            for index, skill_id in enumerate(ids):
+                chosen = "select" if skill_id in selected_skills else "skip"
+                answers[f"skill_{index}"] = {
+                    "type": "choice", "choice": chosen, "confidence": 0.8,
+                    "probabilities": {"select": 0.8 if chosen == "select" else 0.2,
+                                      "skip": 0.8 if chosen == "skip" else 0.2},
+                }
+            continue
         chosen = (selected or {}).get(scope, ids[0])
         others = len(ids) - 1
         probabilities = {name: (0.8 if name == chosen else 0.2 / others)
@@ -417,6 +425,39 @@ class BatchTests(unittest.TestCase):
             body=batch_answer(value) if body is None else body)
         return route.route(value)
 
+    def test_selects_multiple_skills_in_one_request(self):
+        value = batch(("skill",))
+        value["decisions"]["skill"] = [
+            {"id": "test-first", "description": "Implement a feature using tests"},
+            {"id": "security", "description": "Check secret handling"},
+            {"id": "slides", "description": "Create a presentation"},
+        ]
+        use = {"type": "choice", "choice": "select", "confidence": 0.8,
+               "probabilities": {"select": 0.9, "skip": 0.1}}
+        skip = {"type": "choice", "choice": "skip", "confidence": 0.6,
+                "probabilities": {"select": 0.2, "skip": 0.8}}
+        result = self.recommend(value, {"model": "jev-1.13.0", "answers": {
+            "skill_0": use, "skill_1": use, "skill_2": skip}})
+        self.assertEqual(result["decisions"]["skill"], {
+            "choices": ["test-first", "security"],
+            "evaluations": {
+                "test-first": {"choice": "select", "confidence": 0.8,
+                               "probabilities": {"select": 0.9, "skip": 0.1}},
+                "security": {"choice": "select", "confidence": 0.8,
+                             "probabilities": {"select": 0.9, "skip": 0.1}},
+                "slides": {"choice": "skip", "confidence": 0.6,
+                           "probabilities": {"select": 0.2, "skip": 0.8}},
+            },
+        })
+        self.connection.request.assert_called_once()
+        payload = json.loads(self.connection.request.call_args.kwargs["body"])
+        self.assertEqual(set(payload["questions"]), {"skill_0", "skill_1", "skill_2"})
+        for index, skill in enumerate(value["decisions"]["skill"]):
+            question = payload["questions"][f"skill_{index}"]
+            self.assertEqual(question["type"], "choice")
+            self.assertEqual(question["instructions"]["skill"], skill)
+            self.assertEqual(set(question["criteria"]), {"select", "skip"})
+
     def test_seven_scope_combinations_batch_only_selected_questions(self):
         scopes = ("task", "skill", "subagent")
         for count in range(1, 4):
@@ -430,7 +471,10 @@ class BatchTests(unittest.TestCase):
                     self.assertEqual(payload["model"], "jev-latest")
                     self.assertEqual(payload["state"], {
                         key: value[key] for key in ("host", "task", "preference")})
-                    self.assertEqual(set(payload["questions"]), set(selected))
+                    expected_questions = set(selected) - {"skill"}
+                    if "skill" in selected:
+                        expected_questions.add("skill_0")
+                    self.assertEqual(set(payload["questions"]), expected_questions)
                     self.assertEqual(set(result), {
                         "status", "host", "router_model", "decisions"})
                     self.assertEqual(result["status"], "recommended")
@@ -438,13 +482,18 @@ class BatchTests(unittest.TestCase):
                     self.assertEqual(result["router_model"], "jev-1.13.0")
                     self.assertEqual(set(result["decisions"]), set(selected))
                     for scope in selected:
+                        if scope == "skill":
+                            self.assertEqual(result["decisions"]["skill"], {
+                                "choices": ["test-first"],
+                                "evaluations": {"test-first": {
+                                    "choice": "select", "confidence": 0.8,
+                                    "probabilities": {"select": 0.8, "skip": 0.2}}},
+                            })
+                            continue
                         question = payload["questions"][scope]
                         self.assertEqual(question["type"], "choice")
                         expected = {item["id"]: item["description"]
                                     for item in value["decisions"][scope]}
-                        if scope == "skill":
-                            self.assertTrue(question["criteria"]["__none__"])
-                            expected["__none__"] = question["criteria"]["__none__"]
                         self.assertEqual(question["criteria"], expected)
                         reply = batch_answer(value)["answers"][scope]
                         self.assertEqual(result["decisions"][scope], {
@@ -457,15 +506,62 @@ class BatchTests(unittest.TestCase):
             self.assertEqual(route.route(batch(())), {"status": "disabled"})
         self.factory.assert_not_called()
 
-    def test_skill_none_and_empty_inventory_return_null_choice(self):
-        for options in (batch(("skill",))["decisions"]["skill"], []):
-            with self.subTest(candidate_count=len(options)):
-                value = batch(("skill",))
-                value["decisions"]["skill"] = options
-                result = self.recommend(value, batch_answer(value, {"skill": "__none__"}))
-                self.assertIsNone(result["decisions"]["skill"]["choice"])
-                self.assertIn("__none__", result["decisions"]["skill"]["probabilities"])
-                self.assertNotIn("model", result)
+    def test_skipping_every_skill_returns_empty_choices(self):
+        value = batch(("skill",))
+        value["decisions"]["skill"].append({"id": "slides", "description": "Create slides"})
+        result = self.recommend(value, batch_answer(value, {"skill": []}))
+        self.assertEqual(result["decisions"]["skill"], {
+            "choices": [],
+            "evaluations": {
+                "test-first": {"choice": "skip", "confidence": 0.8,
+                               "probabilities": {"select": 0.2, "skip": 0.8}},
+                "slides": {"choice": "skip", "confidence": 0.8,
+                           "probabilities": {"select": 0.2, "skip": 0.8}},
+            },
+        })
+        self.assertNotIn("model", result)
+
+    def test_empty_skill_inventory_needs_no_credentials_or_network(self):
+        value = batch(("skill",))
+        value["decisions"]["skill"] = []
+        with patch.dict(route.os.environ, {}, clear=True), patch.object(
+                route.os.environ, "get", side_effect=AssertionError("No environment read allowed")):
+            self.assertEqual(route.route(value), {
+                "status": "recommended", "host": "test-host", "router_model": None,
+                "decisions": {"skill": {"choices": [], "evaluations": {}}},
+            })
+        self.factory.assert_not_called()
+
+    def test_empty_skills_still_routes_enabled_model_domains(self):
+        value = batch()
+        value["decisions"]["skill"] = []
+        result = self.recommend(value)
+        self.assertEqual(result["decisions"]["skill"], {"choices": [], "evaluations": {}})
+        self.assertEqual(result["decisions"]["task"]["choice"], "task-fast")
+        self.assertEqual(result["decisions"]["subagent"]["choice"], "child-fast")
+        self.connection.request.assert_called_once()
+        payload = json.loads(self.connection.request.call_args.kwargs["body"])
+        self.assertEqual(set(payload["questions"]), {"task", "subagent"})
+
+    def test_skill_ids_cannot_collide_with_question_ids_or_special_words(self):
+        value = batch()
+        value["decisions"]["skill"] = [
+            {"id": name, "description": "An eligible optional workflow"}
+            for name in ("task", "subagent", "skill_0", "__none__", "select", "skip")
+        ]
+        selected = ["task", "skill_0", "__none__", "skip"]
+        body = batch_answer(value, {"skill": selected})
+        body["answers"] = dict(reversed(list(body["answers"].items())))
+        result = self.recommend(value, body)
+        self.assertEqual(result["decisions"]["skill"]["choices"], selected)
+        self.assertEqual(result["decisions"]["task"]["choice"], "task-fast")
+        self.assertEqual(result["decisions"]["subagent"]["choice"], "child-fast")
+        self.connection.request.assert_called_once()
+        payload = json.loads(self.connection.request.call_args.kwargs["body"])
+        self.assertEqual(set(payload["questions"]), {
+            "task", "subagent", "skill_0", "skill_1", "skill_2", "skill_3", "skill_4", "skill_5"})
+        self.assertEqual(payload["questions"]["skill_0"]["instructions"]["skill"]["id"], "task")
+        self.assertEqual(payload["questions"]["skill_2"]["instructions"]["skill"]["id"], "skill_0")
 
     def test_child_summary_and_current_model_are_forwarded_when_applicable(self):
         value = batch(("subagent",))
@@ -488,7 +584,6 @@ class BatchTests(unittest.TestCase):
             {**batch(), "decisions": {"TASK": task()["models"]}},
             {**batch(), "decisions": {"task": []}},
             {**batch(), "decisions": {"subagent": []}},
-            {**batch(), "decisions": {"skill": [{"id": "__none__", "description": "x"}]}},
             {**batch(), "decisions": {"skill": batch()["decisions"]["skill"] * 2}},
             {**batch(), "decisions": {"skill": [{"id": "valid", "description": ""}]}},
             {**batch(), "decisions": {"skill": [{"id": "", "description": "valid"}]}},
@@ -520,31 +615,45 @@ class BatchTests(unittest.TestCase):
                             route.route(value)
                         self.assertEqual(error.exception.code, "invalid_input")
                     else:
+                        self.factory.reset_mock()
                         result = self.recommend(value)
                         self.assertEqual(set(result["decisions"]), {scope})
+                        if scope == "skill" and count == 0:
+                            self.factory.assert_not_called()
+                            continue
                         payload = json.loads(self.connection.request.call_args.kwargs["body"])
-                        self.assertEqual(len(payload["questions"][scope]["criteria"]),
-                                         count + (scope == "skill"))
+                        if scope == "skill":
+                            self.assertEqual(len(payload["questions"]), count)
+                            self.assertEqual(len(result["decisions"]["skill"]["evaluations"]), count)
+                        else:
+                            self.assertEqual(len(payload["questions"][scope]["criteria"]), count)
 
     def test_response_requires_each_requested_scope_and_its_exact_choices(self):
         value = batch()
+        value["decisions"]["skill"].append({"id": "security", "description": "Check secrets"})
         original = batch_answer(value)
         variations = []
-        for scope in value["decisions"]:
+        for scope in original["answers"]:
             missing = copy.deepcopy(original)
             del missing["answers"][scope]
             variations.append(missing)
             for change in ({"choice": "other-domain"}, {"confidence": True},
                            {"probabilities": {"unknown": 1}},
                            {"type": "text"}, {"choice": "__none__"}):
-                if scope == "skill" and change == {"choice": "__none__"}:
-                    continue
                 changed = copy.deepcopy(original)
                 changed["answers"][scope].update(change)
                 variations.append(changed)
         extra = copy.deepcopy(original)
         extra["answers"]["model"] = answer()["answers"]["model"]
         variations.append(extra)
+        obsolete = copy.deepcopy(original)
+        del obsolete["answers"]["skill_0"]
+        del obsolete["answers"]["skill_1"]
+        obsolete["answers"]["skill"] = {
+            "type": "choice", "choice": "test-first", "confidence": 0.8,
+            "probabilities": {"test-first": 0.8, "security": 0.1, "__none__": 0.1},
+        }
+        variations.append(obsolete)
         cross = copy.deepcopy(original)
         cross["answers"]["task"] = original["answers"]["subagent"]
         variations.append(cross)

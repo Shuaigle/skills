@@ -47,11 +47,11 @@ cd skills && ./scripts/link-skills.sh
 | [codebase-design](./skills/codebase-design/SKILL.md) | model | Deep module 詞彙與原則：小介面隱藏大量行為，並選定清楚的 seam |
 | [handoff](./skills/handoff/SKILL.md) | user | 把對話壓縮成交接文檔給下一個 agent |
 | [writing-great-skills](./skills/writing-great-skills/SKILL.md) | user | 寫與改 skill 的參考：invocation 取捨、資訊層級、環境真相、剪枝、leading words、失效模式 |
-| [jev](./skills/jev/SKILL.md) | model | 對話內獨立開關任務模型、skill 與 subagent 模型決策；Claude 原生 mod 自動路由當前請求，Codex Desktop 可自動設定下一回合模型 |
+| [jev](./skills/jev/SKILL.md) | model | 對話內獨立開關任務模型、零到多個 skills 與 subagent 模型決策；Claude 原生 mod 自動路由當前請求，Codex Desktop 可自動設定下一回合模型 |
 
 觸發欄：user = 打名字才會動；model = agent 自行判斷時機，也可手動。
 
-`jev` 有三個獨立選項：`task` 決定主對話模型、`skill` 選一個可自動呼叫的 skill（也可不選）、`subagent` 在每次預定派工前決定該子任務的模型。`jev on` 維持只開啟 `task`；`jev on skill subagent` 累加這兩項，`jev off task` 只關閉主模型決策，`jev on all` 全開，`jev off` 全關，`jev status` 列出三項狀態。新對話預設全關。Claude Code plugin 用 `/shuaigle:jev on skill subagent`，裸 skill 用 `/jev on skill subagent`，Codex 用 `$jev on skill subagent`。
+`jev` 有三個獨立選項：`task` 決定主對話模型、`skill` 可不選或選一到多個可自動呼叫的 skills、`subagent` 在每次預定派工前決定該子任務的模型。`jev on` 維持只開啟 `task`；`jev on skill subagent` 累加這兩項，`jev off task` 只關閉主模型決策，`jev on all` 全開，`jev off` 全關，`jev status` 列出三項狀態。新對話預設全關。Claude Code plugin 用 `/shuaigle:jev on skill subagent`，裸 skill 用 `/jev on skill subagent`，Codex 用 `$jev on skill subagent`。
 
 同一任務的決策合併送出；subagent 使用自己的子任務摘要與 spawn 工具支援的模型清單。只傳摘要與去除私人資訊的候選描述。使用者明確指定的模型、skill，以及手動限定 skill 的政策優先；開啟 subagent 決策不會額外建立 agent。Codex Desktop 的 Jev 切換會設定原對話的下一回合模型，不能改已執行中的回合；須用 turn metadata 確認實際套用。需要在目前回合開始前換模型時，宿主需提供可控制該回合的 app-server 整合。其他沒有同對話切換介面的宿主，回報推薦並依原對話手動切換流程處理。
 

@@ -1,5 +1,5 @@
 interface:
   display_name: "Jev"
-  short_description: "Choose task models, skills, and subagent models with Jev"
+  short_description: "Choose models and zero or more optional skills with Jev"
 policy:
   allow_implicit_invocation: true
