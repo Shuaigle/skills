@@ -28,12 +28,14 @@ codex plugin add shuaigle@shuaigle
 
 這組指令已確認 Codex CLI `0.162.1` 支援。安裝後在 `/hooks` 檢查定義，由使用者批准 hook trust，再手動啟用 Jev。symlink／skills.sh 只安裝 skill；Codex plugin 的 hooks 見 [Codex 路由](./skills/jev/references/codex-native.md)。
 
-開發模式（symlink 進 `~/.claude/skills` 與 `~/.agents/skills`，`git pull` 即更新）：
+開發模式（symlink，`git pull` 即更新）：
 
 ```bash
 git clone https://github.com/Shuaigle/skills.git
 cd skills && ./scripts/link-skills.sh
 ```
+
+腳本固定同步 Codex 的 `~/.agents/skills`；偵測到已安裝的 shuaigle plugin 時，跳過 Claude 的 `~/.claude/skills`。既有 Claude 連結不會因此自動刪除。
 
 呼叫語法：plugin 裝法要帶 namespace（`/shuaigle:grill`）；skills.sh 或 symlink 裝法用裸名（`/grill`）；Codex 用 `$grill`，或由 description 自動觸發。
 
