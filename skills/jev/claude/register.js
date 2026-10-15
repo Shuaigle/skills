@@ -1,12 +1,16 @@
 // Claude Code mods: every session owns its routing state inside register().
 const SCOPES = ['skill', 'subagent'];
-const USAGE = 'Usage: /jev [status | on [skill subagent | all] | off [skill subagent | all]]';
+const USAGE = 'Usage: /jev [status | on/off [skill subagent | all] | exclude/include <model...>]';
 const USER_ORIGINS = ['composer', 'bridge', 'sdk'];
 
 export function parseControl(args) {
   const words = args.trim().split(/\s+/).filter(Boolean);
   const action = words.shift() ?? 'status';
   if (action === 'status') return words.length ? null : { action, scopes: [] };
+  if (action === 'exclude' || action === 'include') {
+    const models = words.map(word => word.toLowerCase());
+    return models.length && models.every(publicModel) ? { action, models } : null;
+  }
   if (action !== 'on' && action !== 'off') return null;
   if (!words.length) return { action, scopes: [...SCOPES] };
   if (words.length === 1 && words[0] === 'all') return { action, scopes: [...SCOPES] };
@@ -19,12 +23,27 @@ function publicModel(id) {
     || /^claude-[a-z0-9][a-z0-9.-]{0,120}$/.test(id));
 }
 
-export function modelCandidates(rows, availableModels) {
+function exclusionKey(model) {
+  if (!publicModel(model)) return undefined;
+  const family = model.match(/^(?:claude-(?:[0-9]+(?:-[0-9]+)*-)?)?(sonnet|opus|haiku|fable)(?:-|$)/);
+  return family ? family[1] : model;
+}
+
+function excluded(model, unavailable) {
+  return unavailable.has(exclusionKey(model));
+}
+
+function spawnKey(parentId, toolId) {
+  return typeof toolId === 'string' && toolId ? JSON.stringify([parentId ?? null, toolId]) : undefined;
+}
+
+export function modelCandidates(rows, availableModels, excludedModels = new Set()) {
   const row = Array.isArray(rows) && rows.find(item => item.key === 'model');
   if (!row || row.kind !== 'choice' || row.isLocked || !Array.isArray(row.options)) return [];
   if (availableModels !== undefined && !Array.isArray(availableModels)) return [];
   return [...new Set(row.options)].filter(id => publicModel(id)
-    && (availableModels === undefined || availableModels.includes(id)))
+    && (availableModels === undefined || availableModels.includes(id))
+    && ![...excludedModels].some(model => exclusionKey(model) === exclusionKey(id)))
     .map((model, index) => ({ id: `subagent-${index}`, model, effort: null,
       description: `Current host model option: ${model}; effort is host-controlled (native spawn has no verified per-spawn effort control).` }));
 }
@@ -62,11 +81,11 @@ function reportedModel(model) {
   return publicModel(model) ? model : '[host model omitted]';
 }
 
-async function chooseSubagent($, text) {
+async function chooseSubagent($, text, unavailable) {
   try {
     const rows = await $.config.list();
     const settings = await $.settings.read();
-    const models = modelCandidates(rows, settings.availableModels);
+    const models = modelCandidates(rows, settings.availableModels, unavailable);
     if (!models.length) {
       safeLog($, 'Jev subagent: model inventory unavailable or locked; using inheritance.');
       return undefined;
@@ -99,11 +118,12 @@ async function chooseSubagent($, text) {
 export function register(on) {
   const enabled = new Set();
   const spawns = new Map();
+  const unavailable = new Set();
   let lastEvidence;
   let serveBareCommand = false;
 
   function reset() {
-    enabled.clear(); spawns.clear(); lastEvidence = undefined;
+    enabled.clear(); spawns.clear(); unavailable.clear(); lastEvidence = undefined;
     serveBareCommand = false;
   }
 
@@ -113,6 +133,11 @@ export function register(on) {
 
   function context() {
     return `JEV_NATIVE_ROUTING ${flags()}. The main conversation uses the host model setting. `
+      + `Manually excluded models in this conversation: ${[...unavailable].sort().join(', ') || 'none'}. `
+      + 'Exclude every model/effort option in those families from each prepared batch and recheck cached '
+      + 'choices before dispatch. Quota for other models is unknown, so keep them eligible. '
+      + 'Only explicit human exclude/include commands change this list; host errors never change it automatically. '
+      + 'Keep the original skills and brief; blocked dispatch does not authorize a replacement model or duplicate work. '
       + 'When skill=on, continue the user-enabled Jev workflow for zero or more optional skills once per '
       + 'independent work unit, reusing its result, including failures, through the batch and continuations. '
       + 'When skill=on and subagent=on, prepare one combined Jev batch per child unit for its applicable '
@@ -137,6 +162,7 @@ export function register(on) {
 
   function status() {
     return `Jev (current session): ${flags()}`
+      + `; unavailable=${[...unavailable].sort().join(',') || 'none'}`
       + (lastEvidence ? `; last ${lastEvidence}` : '');
   }
 
@@ -145,7 +171,7 @@ export function register(on) {
     const existing = (await $.command.list()).find(command => command.name === 'jev');
     if (!existing) {
       await $.command.register({ name: 'jev', description: 'Configure Jev routing for this session',
-        argumentHint: '[status | on/off [skill subagent | all]]' });
+        argumentHint: '[status | on/off [skill subagent | all] | exclude/include <model...>]' });
       serveBareCommand = true;
     } else if ((existing.source === 'plugin' && existing.plugin === 'shuaigle')
       || (existing.source === 'user'
@@ -164,6 +190,15 @@ export function register(on) {
     }
     const control = parseControl(e.args);
     if (!control) return { text: USAGE, context: [context()] };
+    if (control.action === 'exclude' || control.action === 'include') {
+      for (const model of control.models) {
+        const key = exclusionKey(model);
+        if (control.action === 'exclude') unavailable.add(key);
+        else unavailable.delete(key);
+      }
+      return { text: `${status()}; known aliases and full IDs in a family share its exclusion; inclusion does not verify restored quota.`,
+        context: [context()] };
+    }
     if (control.action === 'on') {
       let keyPresent = false;
       try { keyPresent = !!await $.env.get('JEV_API_KEY'); } catch { /* Keep flags unchanged. */ }
@@ -192,9 +227,10 @@ export function register(on) {
       return next(e);
     }
     // tool_use_id is the host's pinned spawn identity, scoped to its parent loop.
-    const key = typeof e.tool_use_id === 'string' && e.tool_use_id
-      ? JSON.stringify([e.parentAgentId ?? null, e.tool_use_id]) : undefined;
+    const key = spawnKey(e.parentAgentId, e.tool_use_id);
+    if (excluded(e.model, unavailable)) return { deny: `Jev: ${exclusionKey(e.model)} is unavailable in this conversation; dispatch blocked.` };
     let state = key && spawns.get(key);
+    let choice;
     if (enabled.has('skill')) {
       // The agent prepares skill + model in one batch; unset is its cached fallback.
       if (!state) {
@@ -206,10 +242,13 @@ export function register(on) {
         state.reported = true;
         safeLog($, 'Jev subagent: combined routing uses the agent-prepared batch; unset model keeps inheritance.');
       }
-      return next(e);
-    }
-    if (e.model !== undefined) return next(e);
-    if (e.effort !== undefined) {
+      const prepared = await state.choice;
+      if (excluded(e.model ?? prepared?.model, unavailable)) {
+        return { deny: `Jev: ${exclusionKey(e.model ?? prepared.model)} is unavailable in this conversation; cached dispatch blocked.` };
+      }
+    } else if (e.model !== undefined) {
+      choice = { model: e.model, effort: e.effort ?? null };
+    } else if (e.effort !== undefined) {
       if (!state) {
         state = { choice: Promise.resolve(undefined), reported: false };
         if (key) spawns.set(key, state);
@@ -218,17 +257,19 @@ export function register(on) {
         state.constraintReported = true;
         safeLog($, 'Jev subagent: explicit effort has no verified compatible model inventory; preserving host dispatch.');
       }
-      return next(e);
+    } else {
+      if (!state) {
+        state = { choice: chooseSubagent($, e.prompt, unavailable), reported: false };
+        if (key) spawns.set(key, state);
+        else safeLog($, 'Jev subagent: no stable spawn ID; routing applies to this event only.');
+      }
+      choice = await state.choice;
     }
-    if (!state) {
-      state = { choice: chooseSubagent($, e.prompt), reported: false };
-      if (key) spawns.set(key, state);
-      else safeLog($, 'Jev subagent: no stable spawn ID; routing applies to this event only.');
-    }
-    const choice = await state.choice;
+    const model = choice?.model ?? e.model;
+    if (excluded(model, unavailable)) return { deny: `Jev: ${exclusionKey(model)} is unavailable in this conversation; cached dispatch blocked.` };
     // There is one existing spawn, not a second agent created by this hook.
-    const result = await next(choice ? { ...e, model: choice.model } : e);
-    if (choice && result?.model && !state.reported) {
+    const result = await next(choice && e.model === undefined ? { ...e, model: choice.model } : e);
+    if (choice && result?.model && state && !state.reported) {
       state.reported = true;
       lastEvidence = `subagent requested=${choice.model} actual=${reportedModel(result.model)} effort=host-controlled`;
       safeLog($, `Jev ${lastEvidence}`);

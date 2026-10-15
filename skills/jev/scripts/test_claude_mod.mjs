@@ -4,6 +4,7 @@ import { register, summarizeTask, modelCandidates } from '../claude/register.js'
 
 function host(options = {}) {
   const hooks = new Map();
+  const matchers = new Map();
   const calls = { processes: [], logs: [], commands: [], env: 0, configs: 0 };
   let rows = options.rows ?? [{ key: 'model', kind: 'choice', isLocked: false,
     options: ['default', 'sonnet', 'opus', 'haiku', 'best', 'opusplan', 'opus[1m]'] }];
@@ -26,14 +27,18 @@ function host(options = {}) {
     } },
   };
   register((name, matcher, hook) => {
-    if (typeof matcher === 'function') hook = matcher;
+    if (typeof matcher === 'function') { hook = matcher; matcher = {}; }
+    matchers.set(name, matcher);
     assert.ok(!hooks.has(name)); hooks.set(name, hook); return { catch() {} };
   });
   let started = false;
   const event = (name, e, next = async input => input) => {
     if (name === 'session.start') started = true;
     if (name === 'session.end') started = false;
-    return hooks.has(name) ? hooks.get(name)($, e, next) : next(e);
+    const matches = Object.entries(matchers.get(name) ?? {}).every(([field, expected]) =>
+      Array.isArray(expected) ? expected.includes(e[field])
+        : expected instanceof RegExp ? expected.test(e[field]) : e[field] === expected);
+    return hooks.has(name) && matches ? hooks.get(name)($, e, next) : next(e);
   };
   const command = async (args, origin = 'composer', name = 'jev') => {
     if (!started) await event('session.start', {});
@@ -57,6 +62,20 @@ async function spawn(h, e = child(), actual = 'claude-haiku-test') {
 
 const allOff = /skill=off subagent=off/;
 const allOn = /skill=on subagent=on/;
+
+test('a human exclusion blocks later combined spawns in this conversation', async () => {
+  const h = host();
+  await h.command('on all');
+  const excluded = await h.command('exclude fable');
+  assert.match(excluded.context[0], /Manually excluded models in this conversation: fable/);
+  assert.match(excluded.context[0], /Only explicit human exclude\/include commands change this list/);
+  let dispatches = 0;
+  const result = await h.event('agent.spawn', child('another-child', { model: 'fable' }),
+    async e => { dispatches++; return { model: e.model, agentId: 'unexpected-start' }; });
+  assert.equal(dispatches, 0, 'a manually excluded model must not start another child');
+  assert.match(result.deny, /fable.*unavailable|unavailable.*fable/i);
+  assert.equal(h.calls.processes.length, 0, 'manual exclusions must not add Jev requests');
+});
 
 test('native session registers controls with all decisions off and no API access', async () => {
   const h = host();
@@ -444,4 +463,89 @@ test('feature summaries contain no source text, code, secret values or private p
   for (const value of ['test-env-secret', '/private/project', 'privateAlgorithm', 'file.js', source]) {
     assert.ok(!summary.includes(value));
   }
+});
+
+test('manual exclude/include is human-only, atomic, key-free and never enables routing', async () => {
+  const h = host({ key: '' });
+  assert.match((await h.command('exclude claude-fable-5-1')).text, /unavailable=fable/);
+  assert.match((await h.command('status')).text, allOff);
+  assert.equal(h.calls.env, 0); assert.equal(h.calls.processes.length, 0);
+  for (const origin of ['plugin', 'peer', 'unclassified']) {
+    assert.match((await h.command('include fable', origin)).text, /user command/);
+    assert.match((await h.command('exclude opus', origin)).text, /user command/);
+  }
+  assert.match((await h.command('exclude opus /private/id')).text, /Usage/);
+  assert.match((await h.command('status')).text, /unavailable=fable/);
+  assert.match((await h.command('include Fable')).text, /unavailable=none/);
+  assert.match((await h.command('include fable')).text, /does not verify restored quota/);
+  assert.equal(h.calls.env, 0);
+});
+
+test('family exclusions filter aliases and full IDs while unknown quotas stay eligible', () => {
+  const rows = [{ key: 'model', kind: 'choice', isLocked: false,
+    options: ['fable', 'claude-fable-5-1', 'sonnet', 'claude-3-5-sonnet-20241022', 'haiku', 'opus'] }];
+  assert.equal(modelCandidates(rows).length, 6);
+  assert.deepEqual(modelCandidates(rows, undefined, new Set(['claude-fable-5-1'])).map(item => item.model),
+    ['sonnet', 'claude-3-5-sonnet-20241022', 'haiku', 'opus']);
+  assert.deepEqual(modelCandidates(rows, undefined, ['sonnet', 'fable']).map(item => item.model), ['haiku', 'opus']);
+});
+
+test('known exclusions guard fresh and cached native/combined choices without new routing or dispatch', async () => {
+  const rows = [{ key: 'model', kind: 'choice', isLocked: false, options: ['fable', 'haiku'] }];
+  const h = host({ rows, choice: 'fable' }); await h.command('on subagent');
+  await spawn(h, child('cached-native'), 'claude-fable-5-1');
+  await h.command('on skill');
+  await spawn(h, child('cached-combined', { model: 'fable' }), 'claude-fable-5-1');
+  await h.command('exclude fable');
+  let count = 0;
+  for (const e of [child('cached-combined'), child('fresh', { model: 'claude-fable-5-1' })]) {
+    const result = await h.event('agent.spawn', e, async () => { count++; });
+    assert.match(result.deny, /fable.*unavailable/);
+  }
+  await h.command('off skill');
+  const result = await h.event('agent.spawn', child('cached-native'), async () => { count++; });
+  assert.match(result.deny, /fable.*unavailable/);
+  assert.equal(count, 0); assert.equal(h.calls.processes.length, 1);
+});
+
+test('future native decisions omit manually excluded families and keep other model options', async () => {
+  const h = host({ rows: [{ key: 'model', kind: 'choice', isLocked: false, options: ['fable', 'haiku'] }] });
+  await h.command('on subagent'); await h.command('exclude fable');
+  assert.equal((await spawn(h)).model, 'haiku');
+  const request = JSON.parse(h.calls.processes[0].init.stdin);
+  assert.deepEqual(request.decisions.subagent.map(item => item.model), ['haiku']);
+  assert.ok(request.decisions.subagent.every(item => item.effort === null));
+});
+
+test('host quota failures pass through once without automatic exclusions or replay', async () => {
+  for (const throws of [false, true]) {
+    const h = host({ rows: [{ key: 'model', kind: 'choice', isLocked: false, options: ['fable', 'haiku'] }],
+      choice: 'fable' });
+    await h.command('on subagent'); let count = 0;
+    const error = new Error('Fable is out of credits');
+    const denial = { deny: error.message };
+    const operation = h.event('agent.spawn', child('failed'), async e => {
+      assert.equal(e.model, 'fable'); count++; if (throws) throw error; return denial;
+    });
+    if (throws) await assert.rejects(operation, value => value === error);
+    else assert.equal(await operation, denial);
+    assert.equal(count, 1); assert.equal(h.calls.processes.length, 1);
+    assert.match((await h.command('status')).text, /unavailable=none/);
+    assert.equal((await spawn(h, child('next-planned'), 'claude-fable-test')).model, 'fable');
+    assert.equal(h.calls.processes.length, 2);
+    assert.ok(JSON.parse(h.calls.processes[1].init.stdin).decisions.subagent.some(item => item.model === 'fable'));
+  }
+});
+
+test('off pauses dispatch guards but retains manual exclusions until this session ends', async () => {
+  const h = host(); await h.command('on all'); await h.command('exclude fable'); await h.command('off');
+  const e = child('off-allowed', { model: 'fable' }); assert.equal(await spawn(h, e, 'fable'), e);
+  assert.match((await h.command('status')).text, /unavailable=fable/);
+  await h.command('on skill');
+  assert.equal(await spawn(h, e, 'fable'), e);
+  await h.command('on subagent'); let count = 0;
+  assert.ok((await h.event('agent.spawn', e, async () => { count++; })).deny);
+  assert.equal(count, 0);
+  const other = host(); assert.match((await other.command('status')).text, /unavailable=none/);
+  await h.event('session.end', {}); assert.match((await h.command('status')).text, /unavailable=none/);
 });

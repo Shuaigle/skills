@@ -56,6 +56,8 @@ For a child unit, include `spawn` with the exact planned spawn arguments and a s
 
 The gate validates every atomic option against that matrix, caches the chosen pair, and binds its receipt to the planned spawn. It rewrites the exact selected `model` and `reasoning_effort`; a null effort removes a stale effort field. It never chooses a different compatible effort after Jev's decision. Assistant-filled spawn fields are not evidence of explicit human constraints; encode the user's constraints by narrowing candidates. Host-reported runtime metadata remains verification of the applied pair when available.
 
+This validates capabilities, not remaining credits. The Codex gate does not check credits or implement Claude's native `exclude`/`include` commands. Apply human model constraints while preparing candidates; unknown quota remains eligible and is reported as unverified. Changed constraints require a new unit or revision instead of reusing a blocked choice. The request and capability-matrix contract stay unchanged.
+
 Choose delegation for an independently useful batch, such as reading many files and returning a compact summary. A short read usually stays local because a new agent adds context. Jev chooses the child's model/effort pair from supported options in the same batch as enabled skill selection. Model size alone does not establish a token saving. Pass selected skills and already-consumed initial decisions in the brief so the child applies them without routing its startup again. Follow-ups to that child reuse the same decision until its goal changes.
 
 ## Coverage and local data

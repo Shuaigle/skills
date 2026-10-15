@@ -56,7 +56,7 @@ cd skills && ./scripts/link-skills.sh
 | [codebase-design](./skills/codebase-design/SKILL.md) | model | Deep module 詞彙與原則：小介面隱藏大量行為，並選定清楚的 seam |
 | [handoff](./skills/handoff/SKILL.md) | user | 把對話壓縮成交接文檔給下一個 agent |
 | [writing-great-skills](./skills/writing-great-skills/SKILL.md) | user | 寫與改 skill 的參考：invocation 取捨、資訊層級、環境真相、剪枝、leading words、失效模式 |
-| [jev](./skills/jev/SKILL.md) | user | 使用者啟用後，在目前對話選零到多個 skills 與宿主支援的 subagent 模型／effort 組合；每個獨立子任務只問一次並重用決策 |
+| [jev](./skills/jev/SKILL.md) | user | 使用者啟用後選零到多個 skills 與 subagent 模型／effort 組合，每個獨立子任務只問一次；Claude native 支援在本對話手動排除模型，未知額度仍可路由 |
 
 觸發欄：user = 打名字才會動；model = agent 自行判斷時機，也可手動。
 
@@ -67,6 +67,10 @@ cd skills && ./scripts/link-skills.sh
 Codex hooks 在涵蓋的工具路徑上要求先取得子任務決策，路由前依宿主的逐模型能力清單驗證候選組合，再把已準備的 spawn 改為 Jev 選出的模型與 `reasoning_effort`；null 會清除舊 effort 欄位。快取保留目前對話的旗標、雜湊與最小決策，不保存金鑰、原始任務或 child brief；路由失敗也會重用該次 fallback。resume／compact 保留狀態，新的、fork 或 clear 對話重設全關。hooks 無法辨識所有語意上的任務邊界，特殊工具是否涵蓋取決於宿主，需在實際宿主確認。
 
 Claude 原生 mod 載入後，只有 `subagent` 開啟時由 mod 在預定 spawn 前詢問 Jev，依該次 spawn 的識別重用成功或失敗決策；status 回報推薦與實際子模型。目前 native spawn 介面沒有可驗證的 effort 覆寫欄位／逐模型能力清單，該路徑用 null，effort 仍由宿主控制。這不代表 Claude 的其他派工介面不能設定 effort。
+
+工具 enum、模型選單與組織 allowlist 不代表剩餘 credits；未知額度仍可路由。Claude native 的排除清單只由人輸入 `/jev exclude <models...>`、`/jev include <models...>` 改動，不需 API key，也不改啟用旗標。額度錯誤不會自動排除模型；使用者可在失敗後 exclude、恢復後 include。Include 只解除本地排除，不驗證額度。已知模型家族的 alias 與版本 ID 共用排除範圍，排除其中一個會排除整個家族。
+
+`subagent` 開啟時，Claude native 過濾新子任務候選並在派工前重查準備及快取選擇；resume、fork、workflow 沿用宿主行為，不受這項 guard 保護。關閉時暫停檢查但保留清單，新 session／module 重載／結束時重設。它不會自行換成另一模型或重播失敗工作。排除變更後保留已選 skills 與 brief，以新 routing unit／revision 交 Jev 選更新後的候選，避免重播可能已有副作用的工作。Codex gate 不提供這兩個原生命令或額度檢查。
 
 Claude 內建 Agent 工具在 `2.1.292+` 支援非 fork 的逐次 effort。兩項全開時，agent 對 child unit 一次批次詢問 skill＋模型／effort 選項；有可信矩陣時精確套用 Jev 選出的 `Agent.model`／`Agent.effort`，skills 放入 brief。缺矩陣時仍用已驗證模型的 `effort: null` 選項與 skills 同批詢問，effort 留給宿主預設並明示未路由；不能把工具的 effort enum 直接乘上全部模型。Mod 不再問第二次；API 或回應驗證失敗時整批沿用原設定。這個混合流程依賴 agent 準備，沒有原生 receipt 強制檢查。只開 `skill` 或本地工作由 agent 選 skills 並重用。旗標只存在記憶體，mod 重載或 session 結束即重設。詳見 [Claude 路由](./skills/jev/references/claude-native.md)。
 
