@@ -35,7 +35,7 @@ git clone https://github.com/Shuaigle/skills.git
 cd skills && ./scripts/link-skills.sh
 ```
 
-腳本固定同步 Codex 的 `~/.agents/skills`；偵測到已安裝的 shuaigle plugin 時，跳過 Claude 的 `~/.claude/skills`。既有 Claude 連結不會因此自動刪除。
+腳本分別查詢 Claude Code 與 Codex 的 plugin 安裝狀態；已安裝 shuaigle plugin 時，跳過該宿主的 skill 連結，避免重複載入。未安裝時同步 `~/.claude/skills` 或 `~/.agents/skills`；既有連結不會因此自動刪除。
 
 呼叫語法：plugin 裝法要帶 namespace（`/shuaigle:grill`）；skills.sh 或 symlink 裝法用裸名（`/grill`）；Codex 用 `$grill`，或由 description 自動觸發。
 

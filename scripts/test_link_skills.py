@@ -43,18 +43,19 @@ class LinkSkillsTests(unittest.TestCase):
         self.env = os.environ.copy()
         self.env.update(PATH=str(self.bin), SKILL_LINK_TEST_ROOT=str(self.root / "destinations"))
 
-    def registry(self, value, exit_code=0):
-        self.env["SKILL_LINK_TEST_JSON"] = value if isinstance(value, str) else json.dumps(value)
-        self.env["SKILL_LINK_TEST_EXIT"] = str(exit_code)
-        stub = self.bin / "claude"
+    def registry(self, value, exit_code=0, harness="claude"):
+        prefix = f"SKILL_LINK_TEST_{harness.upper()}"
+        self.env[f"{prefix}_JSON"] = value if isinstance(value, str) else json.dumps(value)
+        self.env[f"{prefix}_EXIT"] = str(exit_code)
+        stub = self.bin / harness
         stub.write_text(
             '#!/usr/bin/env bash\n'
             '[ "$*" = "plugin list --json" ] || exit 90\n'
-            'if [ "$SKILL_LINK_TEST_EXIT" != 0 ]; then\n'
+            f'if [ "${prefix}_EXIT" != 0 ]; then\n'
             '  echo "private query diagnostic" >&2\n'
-            '  exit "$SKILL_LINK_TEST_EXIT"\n'
+            f'  exit "${prefix}_EXIT"\n'
             'fi\n'
-            'printf "%s" "$SKILL_LINK_TEST_JSON"\n'
+            f'printf "%s" "${prefix}_JSON"\n'
         )
         stub.chmod(0o755)
 
@@ -79,6 +80,11 @@ class LinkSkillsTests(unittest.TestCase):
     def assert_claude_skipped(self, result):
         self.assertFalse(self.claude.exists())
         self.assert_linked(self.codex)
+        self.assertNotIn("private query diagnostic", result.stdout + result.stderr)
+
+    def assert_codex_skipped(self, result):
+        self.assertFalse(self.codex.exists())
+        self.assert_linked(self.claude)
         self.assertNotIn("private query diagnostic", result.stdout + result.stderr)
 
     def test_installed_plugin_skips_claude(self):
@@ -111,6 +117,48 @@ class LinkSkillsTests(unittest.TestCase):
         self.assert_linked(self.claude)
         self.assert_linked(self.codex)
 
+    def test_installed_codex_plugin_skips_codex(self):
+        self.registry({"installed": [{"pluginId": "shuaigle@shuaigle", "installed": True,
+                                       "enabled": True, "version": "0.11.1"}],
+                       "available": []}, harness="codex")
+        result = self.run_links()
+        self.assert_codex_skipped(result)
+        self.assertIn("skip    Codex skills", result.stdout)
+
+    def test_disabled_codex_plugin_from_another_marketplace_still_skips_codex(self):
+        self.registry({"installed": [
+            {"pluginId": "other@marketplace", "installed": True},
+            {"pluginId": "shuaigle@local-marketplace", "installed": True, "enabled": False},
+        ]}, harness="codex")
+        self.assert_codex_skipped(self.run_links())
+
+    def test_absent_codex_plugin_links_both_harnesses(self):
+        self.registry({"installed": [{"pluginId": "other@marketplace", "installed": True,
+                                       "name": "shuaigle"}], "available": []}, harness="codex")
+        self.run_links()
+        self.assert_linked(self.claude)
+        self.assert_linked(self.codex)
+
+    def test_available_or_uninstalled_codex_plugin_does_not_skip_links(self):
+        for installed in ([], [{"pluginId": "shuaigle@shuaigle", "installed": False}]):
+            with self.subTest(installed=installed):
+                self.registry({"installed": installed, "available": [
+                    {"pluginId": "shuaigle@shuaigle", "installed": False},
+                ]}, harness="codex")
+                self.run_links()
+                self.assert_linked(self.claude)
+                self.assert_linked(self.codex)
+
+    def test_both_installed_plugins_create_no_skill_destinations(self):
+        self.registry([{"id": "shuaigle@shuaigle"}])
+        self.registry({"installed": [{"pluginId": "shuaigle@shuaigle", "installed": True}]},
+                      harness="codex")
+        result = self.run_links()
+        self.assertFalse(self.claude.exists())
+        self.assertFalse(self.codex.exists())
+        self.assertIn("skip    Claude skills", result.stdout)
+        self.assertIn("skip    Codex skills", result.stdout)
+
     def test_query_failure_skips_claude_and_still_links_codex(self):
         self.registry([], exit_code=1)
         result = self.run_links()
@@ -139,6 +187,39 @@ class LinkSkillsTests(unittest.TestCase):
         self.assert_claude_skipped(result)
         self.assertIn("Python 3", result.stderr)
 
+    def test_codex_query_failure_skips_codex_and_still_links_claude(self):
+        self.registry({"installed": []}, exit_code=1, harness="codex")
+        result = self.run_links()
+        self.assert_codex_skipped(result)
+        self.assertIn("warning:", result.stderr)
+
+    def test_codex_malformed_json_skips_codex_and_still_links_claude(self):
+        self.registry("{private broken registry", harness="codex")
+        result = self.run_links()
+        self.assert_codex_skipped(result)
+        self.assertIn("warning:", result.stderr)
+        self.assertNotIn("private broken registry", result.stdout + result.stderr)
+
+    def test_codex_unrecognized_registry_schema_skips_codex(self):
+        for registry in ([], {}, {"installed": None}, {"installed": [None]},
+                         {"installed": [{"id": "shuaigle@shuaigle", "installed": True}]},
+                         {"installed": [{"pluginId": "shuaigle@shuaigle"}]},
+                         {"installed": [{"pluginId": "shuaigle@shuaigle", "installed": "true"}]}):
+            with self.subTest(registry=registry):
+                self.registry(registry, harness="codex")
+                result = self.run_links()
+                self.assert_codex_skipped(result)
+                self.assertIn("warning:", result.stderr)
+
+    def test_missing_python_skips_both_present_clis(self):
+        self.registry([])
+        self.registry({"installed": []}, harness="codex")
+        (self.bin / "python3").unlink()
+        result = self.run_links()
+        self.assertFalse(self.claude.exists())
+        self.assertFalse(self.codex.exists())
+        self.assertEqual(result.stderr.count("Python 3"), 2)
+
     def test_installed_plugin_leaves_all_claude_entries_untouched(self):
         self.registry([{"id": "shuaigle@shuaigle"}])
         self.claude.mkdir(parents=True)
@@ -154,6 +235,23 @@ class LinkSkillsTests(unittest.TestCase):
         self.assertEqual(os.readlink(self.claude / "beta"), str(foreign))
         self.assertTrue((self.claude / "local").is_dir())
         self.assert_linked(self.codex)
+
+    def test_installed_codex_plugin_leaves_all_codex_entries_untouched(self):
+        self.registry({"installed": [{"pluginId": "shuaigle@shuaigle", "installed": True}]},
+                      harness="codex")
+        self.codex.mkdir(parents=True)
+        (self.codex / "alpha").symlink_to(self.repo / "skills" / "alpha")
+        (self.codex / "old").symlink_to(self.repo / "skills" / "deleted")
+        foreign = self.root / "foreign"
+        foreign.mkdir()
+        (self.codex / "beta").symlink_to(foreign)
+        (self.codex / "local").mkdir()
+        self.run_links()
+        self.assertEqual(os.readlink(self.codex / "alpha"), str(self.repo / "skills" / "alpha"))
+        self.assertEqual(os.readlink(self.codex / "old"), str(self.repo / "skills" / "deleted"))
+        self.assertEqual(os.readlink(self.codex / "beta"), str(foreign))
+        self.assertTrue((self.codex / "local").is_dir())
+        self.assert_linked(self.claude)
 
     def test_other_source_entries_are_preserved_and_only_own_stale_links_pruned(self):
         self.registry([])
@@ -183,6 +281,15 @@ class LinkSkillsTests(unittest.TestCase):
         self.assertIn("指向本 repo", result.stderr)
         self.assertFalse((self.repo / "skills" / "alpha").is_symlink())
         self.assertFalse(self.codex.exists())
+
+    def test_codex_destination_symlink_into_repo_is_rejected_before_codex_writes(self):
+        self.registry({"installed": []}, harness="codex")
+        self.codex.parent.mkdir(parents=True)
+        self.codex.symlink_to(self.repo / "skills")
+        result = self.run_links(success=False)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("指向本 repo", result.stderr)
+        self.assertFalse((self.repo / "skills" / "alpha").is_symlink())
 
 
 if __name__ == "__main__":

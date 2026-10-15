@@ -5,8 +5,8 @@ set -euo pipefail
 #   - ~/.claude/skills  — Claude Code
 #   - ~/.agents/skills  — Codex 等 Agent Skills 相容 harness
 # `git pull` 後重跑即同步。行為：
-#   - 已安裝 shuaigle plugin 時略過 Claude；查詢失敗也略過，避免重複載入
-#   - 沒有 Claude CLI 時沿用兩個目錄；CLI 查詢使用 Python 3 解析 JSON
+#   - 已安裝 shuaigle plugin 時略過對應 harness；查詢失敗也略過，避免重複載入
+#   - 沒有對應 CLI 時沿用連結；CLI 查詢使用 Python 3 解析 JSON
 #   - 只認 skills/*/SKILL.md（不撈更深層的巢狀檔案）
 #   - 先清掉「指向本 repo 但 skill 已刪除/改名」的 stale symlink
 #   - 指向其他來源的同名 symlink：跳過並警告，不覆蓋
@@ -14,44 +14,59 @@ set -euo pipefail
 
 REPO="$(cd "$(dirname "$0")/.." && pwd)"
 
-claude_links_needed() {
-  local plugin_list plugin_state
-  command -v claude >/dev/null 2>&1 || return 0
+harness_links_needed() {
+  local cli="$1" harness="$2" plugin_list plugin_state
+  command -v "$cli" >/dev/null 2>&1 || return 0
   if ! command -v python3 >/dev/null 2>&1; then
-    echo "warning: 找不到 Python 3，無法確認 shuaigle plugin；略過 Claude skills，同步 Codex。" >&2
+    echo "warning: 找不到 Python 3，無法確認 shuaigle plugin；略過 $harness skills。" >&2
     return 1
   fi
-  if ! plugin_list="$(claude plugin list --json 2>/dev/null)"; then
-    echo "warning: 無法查詢已安裝的 Claude plugins；略過 Claude skills，同步 Codex。" >&2
+  if ! plugin_list="$("$cli" plugin list --json 2>/dev/null)"; then
+    echo "warning: 無法查詢已安裝的 $harness plugins；略過 $harness skills。" >&2
     return 1
   fi
   if ! plugin_state="$(printf '%s' "$plugin_list" | python3 -c '
 import json, sys
-plugins = json.load(sys.stdin)
+registry = json.load(sys.stdin)
+if sys.argv[1] == "codex":
+    if not isinstance(registry, dict) or not isinstance(registry.get("installed"), list):
+        raise ValueError("invalid installed plugin registry")
+    plugins = registry["installed"]
+    id_key = "pluginId"
+    if any(not isinstance(plugin, dict) or not isinstance(plugin.get("installed"), bool) for plugin in plugins):
+        raise ValueError("invalid installed plugin record")
+else:
+    plugins = registry
+    id_key = "id"
 if not isinstance(plugins, list) or any(
     not isinstance(plugin, dict)
-    or not isinstance(plugin.get("id"), str)
-    or not plugin["id"]
+    or not isinstance(plugin.get(id_key), str)
+    or not plugin[id_key]
     for plugin in plugins
 ):
     raise ValueError("invalid installed plugin list")
-print("installed" if any(plugin["id"].startswith("shuaigle@") for plugin in plugins) else "absent")
-' 2>/dev/null)"; then
-    echo "warning: Claude plugin 清單不是可辨識的 JSON；略過 Claude skills，同步 Codex。" >&2
+print("installed" if any(
+    plugin[id_key].startswith("shuaigle@") and (sys.argv[1] != "codex" or plugin["installed"])
+    for plugin in plugins
+) else "absent")
+' "$cli" 2>/dev/null)"; then
+    echo "warning: $harness plugin 清單不是可辨識的 JSON；略過 $harness skills。" >&2
     return 1
   fi
   if [ "$plugin_state" = installed ]; then
-    echo "skip    Claude skills（已安裝 shuaigle plugin，保留既有連結）"
+    echo "skip    $harness skills（已安裝 shuaigle plugin，保留既有連結）"
     return 1
   fi
   return 0
 }
 
 DESTS=()
-if claude_links_needed; then
+if harness_links_needed claude Claude; then
   DESTS+=("$HOME/.claude/skills")
 fi
-DESTS+=("$HOME/.agents/skills")
+if harness_links_needed codex Codex; then
+  DESTS+=("$HOME/.agents/skills")
+fi
 
 names=()
 srcs=()
@@ -64,6 +79,11 @@ done < <(find "$REPO/skills" -mindepth 2 -maxdepth 2 -name SKILL.md -print0)
 if [ "${#names[@]}" -eq 0 ]; then
   echo "error: 找不到任何 skills/*/SKILL.md" >&2
   exit 1
+fi
+
+# Bash 3.2 在 nounset 下不能展開空陣列。
+if [ "${#DESTS[@]}" -eq 0 ]; then
+  exit 0
 fi
 
 in_current_set() {
