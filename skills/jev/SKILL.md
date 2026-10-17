@@ -12,7 +12,7 @@ Let Jev choose zero or more optional skills and a planned subagent's model and r
 
 In Codex with this plugin's hooks loaded, read [Codex routing](references/codex-native.md). Human commands own the flags; before covered work tools, declare each independent unit through the emitted `begin` command. It caches the routing result and applies prepared child-model and effort choices. Use the hook's state instead of a second skill-only state.
 
-In Claude Code with this plugin's native mod loaded, read [Claude routing](references/claude-native.md). Its `/jev` commands own the flags. With only `subagent` enabled, the spawn hook owns child routing. With both decisions enabled, prepare one child batch here, apply its model and supported effort through the spawn fields, and put skills in the brief; the mod preserves that preparation without another Jev call. Follow the emitted native context. Other hosts retain the workflow below.
+In Claude Code with this plugin's native mod loaded, read [Claude routing](references/claude-native.md). Its `/jev` commands own the flags. With only `subagent` enabled, the mod owns child model and effort routing and reports the applied effort as unverified. With both decisions enabled, prepare one child batch here, apply its model and supported effort through the spawn fields, and put skills in the brief; the mod preserves that preparation without another Jev call. Follow the emitted native context. Other hosts retain the workflow below.
 
 ## Control
 

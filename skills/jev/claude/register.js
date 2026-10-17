@@ -2,6 +2,9 @@
 const SCOPES = ['skill', 'subagent'];
 const USAGE = 'Usage: /jev [status | on/off [skill subagent | all] | exclude/include <model...>]';
 const USER_ORIGINS = ['composer', 'bridge', 'sdk'];
+const EFFORTS = ['low', 'medium', 'high', 'xhigh', 'max'];
+// A child's first model request can precede its spawn's answer; wait this long for the agentId.
+const PENDING_WAIT_MS = 3000;
 
 export function parseControl(args) {
   const words = args.trim().split(/\s+/).filter(Boolean);
@@ -37,15 +40,18 @@ function spawnKey(parentId, toolId) {
   return typeof toolId === 'string' && toolId ? JSON.stringify([parentId ?? null, toolId]) : undefined;
 }
 
-export function modelCandidates(rows, availableModels, excludedModels = new Set()) {
+export function modelCandidates(rows, availableModels, excludedModels = new Set(), efforts = EFFORTS) {
   const row = Array.isArray(rows) && rows.find(item => item.key === 'model');
   if (!row || row.kind !== 'choice' || row.isLocked || !Array.isArray(row.options)) return [];
   if (availableModels !== undefined && !Array.isArray(availableModels)) return [];
   return [...new Set(row.options)].filter(id => publicModel(id)
     && (availableModels === undefined || availableModels.includes(id))
     && ![...excludedModels].some(model => exclusionKey(model) === exclusionKey(id)))
-    .map((model, index) => ({ id: `subagent-${index}`, model, effort: null,
-      description: `Current host model option: ${model}; effort is host-controlled (native spawn has no verified per-spawn effort control).` }));
+    .flatMap(model => efforts.map(effort => ({ model, effort })))
+    .map(({ model, effort }, index) => ({ id: `subagent-${index}`, model, effort,
+      description: effort === null
+        ? `Current host model option: ${model}; effort is host-controlled.`
+        : `Current host model option: ${model} at ${effort} effort; the host lowers or drops an effort this model does not support.` }));
 }
 
 export function summarizeTask(text) {
@@ -81,16 +87,20 @@ function reportedModel(model) {
   return publicModel(model) ? model : '[host model omitted]';
 }
 
-async function chooseSubagent($, text, unavailable) {
+async function chooseSubagent($, text, unavailable, stableId) {
   try {
     const rows = await $.config.list();
     const settings = await $.settings.read();
-    const models = modelCandidates(rows, settings.availableModels, unavailable);
+    let note;
+    if (await $.env.get('CLAUDE_CODE_EFFORT_LEVEL')) note = 'locked by CLAUDE_CODE_EFFORT_LEVEL';
+    else if (!stableId) note = 'host-controlled (no stable spawn ID to detect an explicit Agent effort)';
+    if (note) safeLog($, `Jev subagent: effort ${note}; routing the model only.`);
+    const efforts = note ? [null] : EFFORTS;
+    const models = modelCandidates(rows, settings.availableModels, unavailable, efforts);
     if (!models.length) {
       safeLog($, 'Jev subagent: model inventory unavailable or locked; using inheritance.');
       return undefined;
     }
-    safeLog($, 'Jev subagent: native spawn has no verified per-spawn effort control; selecting a model with host-controlled effort.');
     if (!await $.env.get('JEV_API_KEY')) {
       safeLog($, 'Jev subagent: missing JEV_API_KEY; using inheritance.');
       return undefined;
@@ -108,23 +118,38 @@ async function chooseSubagent($, text, unavailable) {
       || !selected || decision.model !== selected.model || decision.effort !== selected.effort
       || typeof decision.confidence !== 'number' || !Number.isFinite(decision.confidence)
       || decision.confidence < 0 || decision.confidence > 1) throw new Error('invalid routing result');
-    return { model: selected.model, effort: selected.effort };
+    return { model: selected.model, effort: selected.effort, note };
   } catch {
     safeLog($, 'Jev subagent: routing failed; using inheritance.');
     return undefined;
   }
 }
 
+async function childEffort($, agentId, childEfforts, pendingSpawns) {
+  if (agentId === undefined) return undefined;
+  if (!childEfforts.has(agentId) && pendingSpawns.size) {
+    try {
+      await Promise.race([Promise.allSettled([...pendingSpawns]), $.clock.sleep(PENDING_WAIT_MS)]);
+    } catch { /* An unknown child keeps its host effort. */ }
+  }
+  return childEfforts.get(agentId);
+}
+
 export function register(on) {
   const enabled = new Set();
   const spawns = new Map();
   const unavailable = new Set();
+  // Agent tool arguments by spawn key: agent.spawn does not carry the call's effort.
+  const agentCalls = new Map();
+  // Jev-selected effort by child agentId, applied to each of that child's model requests.
+  const childEfforts = new Map();
+  const pendingSpawns = new Set();
   let lastEvidence;
   let serveBareCommand = false;
 
   function reset() {
-    enabled.clear(); spawns.clear(); unavailable.clear(); lastEvidence = undefined;
-    serveBareCommand = false;
+    enabled.clear(); spawns.clear(); unavailable.clear(); agentCalls.clear(); childEfforts.clear();
+    pendingSpawns.clear(); lastEvidence = undefined; serveBareCommand = false;
   }
 
   function flags() {
@@ -150,9 +175,11 @@ export function register(on) {
       + 'If the user fixed effort and compatible models cannot be verified, preserve the original model and '
       + 'that effort, route only optional skills, and never replace the user\'s value with null. '
       + 'Reuse a failed batch as inheritance and ordinary skills; the native hook never reroutes this combined path. '
-      + 'When skill=off and subagent=on, native hooks choose the child model; omit Agent.model unless the user fixed it. '
-      + 'Native candidates currently use effort:null because native spawn has no verified per-spawn effort control; '
-      + 'effort stays host-controlled and can be overridden by environment or organization policy. '
+      + 'When skill=off and subagent=on, native hooks choose the child model and effort; omit Agent.model and Agent.effort unless the user fixed them. '
+      + 'Native candidates pair each offered model with low, medium, high, xhigh and max; the mod applies the chosen '
+      + 'effort to each of that child\'s model requests. The host silently lowers or drops an effort the model does '
+      + 'not support, so native status reports the requested effort and an unverified actual one. An explicit '
+      + 'Agent.effort, a spawn without a stable ID, or CLAUDE_CODE_EFFORT_LEVEL keeps effort host-controlled. '
       + 'Resumed agents keep their existing pair. Workflow routing remains host-owned because this path '
       + 'does not yet have safe independent unit/cache identification. '
       + 'Read installed Jev instructions as needed under the existing human authorization. Native /jev controls '
@@ -212,6 +239,13 @@ export function register(on) {
 
   on('prompt.submit', ($, e, next) => next({ ...e, context: [...(e.context ?? []), context()] }));
 
+  on('tool.call', { tool: 'Agent' }, async ($, e, next) => {
+    const key = spawnKey(e.agentId, e.tool_use_id);
+    if (!key) return next(e);
+    agentCalls.set(key, { effort: e.effort });
+    try { return await next(e); } finally { agentCalls.delete(key); }
+  });
+
   on('agent.spawn', async ($, e, next) => {
     if (!enabled.has('subagent')) return next(e);
     if (e.resume) {
@@ -228,13 +262,14 @@ export function register(on) {
     }
     // tool_use_id is the host's pinned spawn identity, scoped to its parent loop.
     const key = spawnKey(e.parentAgentId, e.tool_use_id);
+    const explicitEffort = key ? agentCalls.get(key)?.effort : undefined;
     if (excluded(e.model, unavailable)) return { deny: `Jev: ${exclusionKey(e.model)} is unavailable in this conversation; dispatch blocked.` };
     let state = key && spawns.get(key);
     let choice;
     if (enabled.has('skill')) {
       // The agent prepares skill + model in one batch; unset is its cached fallback.
       if (!state) {
-        state = { choice: Promise.resolve(e.model === undefined ? undefined : { model: e.model, effort: e.effort ?? null }),
+        state = { choice: Promise.resolve(e.model === undefined ? undefined : { model: e.model, effort: explicitEffort ?? null }),
           reported: false };
         if (key) spawns.set(key, state);
       }
@@ -247,8 +282,8 @@ export function register(on) {
         return { deny: `Jev: ${exclusionKey(e.model ?? prepared.model)} is unavailable in this conversation; cached dispatch blocked.` };
       }
     } else if (e.model !== undefined) {
-      choice = { model: e.model, effort: e.effort ?? null };
-    } else if (e.effort !== undefined) {
+      choice = { model: e.model, effort: explicitEffort ?? null };
+    } else if (explicitEffort !== undefined) {
       if (!state) {
         state = { choice: Promise.resolve(undefined), reported: false };
         if (key) spawns.set(key, state);
@@ -259,7 +294,7 @@ export function register(on) {
       }
     } else {
       if (!state) {
-        state = { choice: chooseSubagent($, e.prompt, unavailable), reported: false };
+        state = { choice: chooseSubagent($, e.prompt, unavailable, !!key), reported: false };
         if (key) spawns.set(key, state);
         else safeLog($, 'Jev subagent: no stable spawn ID; routing applies to this event only.');
       }
@@ -267,14 +302,44 @@ export function register(on) {
     }
     const model = choice?.model ?? e.model;
     if (excluded(model, unavailable)) return { deny: `Jev: ${exclusionKey(model)} is unavailable in this conversation; cached dispatch blocked.` };
-    // There is one existing spawn, not a second agent created by this hook.
-    const result = await next(choice && e.model === undefined ? { ...e, model: choice.model } : e);
+    const routed = choice && e.model === undefined;
+    const effort = routed ? choice.effort : null;
+    // Hold the child's early model requests until its agentId maps to the selected effort.
+    let release, gate;
+    if (effort) { gate = new Promise(done => { release = done; }); pendingSpawns.add(gate); }
+    let result;
+    try {
+      // There is one existing spawn, not a second agent created by this hook.
+      result = await next(routed ? { ...e, model: choice.model } : e);
+      if (effort && result?.agentId) {
+        childEfforts.set(result.agentId, { effort, model: choice.model, reported: false });
+      }
+    } finally {
+      if (gate) { pendingSpawns.delete(gate); release(); }
+    }
     if (choice && result?.model && state && !state.reported) {
       state.reported = true;
-      lastEvidence = `subagent requested=${choice.model} actual=${reportedModel(result.model)} effort=host-controlled`;
+      const effortText = effort ? `requested=${effort} actual=awaiting first request`
+        : choice.note ?? 'host-controlled';
+      lastEvidence = `subagent requested=${choice.model} actual=${reportedModel(result.model)} effort ${effortText}`;
       safeLog($, `Jev ${lastEvidence}`);
     }
     return result;
+  });
+
+  on('turn.step', async function* ($, e, next) {
+    const state = await childEffort($, e.agentId, childEfforts, pendingSpawns);
+    if (!state) return yield* next(e);
+    // The host sends no effort to a model without one and lowers an unsupported level silently.
+    const actual = e.effort === undefined ? 'none (the model takes no effort)'
+      : 'unverified (the host lowers an unsupported effort without reporting it)';
+    if (!state.reported) {
+      state.reported = true;
+      lastEvidence = `subagent requested=${state.model} effort requested=${state.effort} actual=${actual}`;
+      safeLog($, `Jev ${lastEvidence}`);
+    }
+    if (e.effort === undefined || e.effort === state.effort) return yield* next(e);
+    return yield* next({ ...e, effort: state.effort });
   });
 
   on('session.end', ($, e, next) => { reset(); return next(e); });

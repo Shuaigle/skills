@@ -1,17 +1,22 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { register, summarizeTask, modelCandidates } from '../claude/register.js';
+import { readFileSync } from 'node:fs';
 
 function host(options = {}) {
   const hooks = new Map();
   const matchers = new Map();
-  const calls = { processes: [], logs: [], commands: [], env: 0, configs: 0 };
+  const calls = { processes: [], logs: [], commands: [], env: 0, configs: 0, sleeps: [] };
   let rows = options.rows ?? [{ key: 'model', kind: 'choice', isLocked: false,
     options: ['default', 'sonnet', 'opus', 'haiku', 'best', 'opusplan', 'opus[1m]'] }];
   let key = options.key === undefined ? 'synthetic-test-key' : options.key;
   const $ = {
     plugin: { root: '/test/plugin' },
-    env: { get: async name => { assert.equal(name, 'JEV_API_KEY'); calls.env++; return key; } },
+    env: { get: async name => {
+      if (name === 'CLAUDE_CODE_EFFORT_LEVEL') return options.effortEnv;
+      assert.equal(name, 'JEV_API_KEY'); calls.env++; return key;
+    } },
+    clock: { sleep: ms => { calls.sleeps.push(ms); return options.sleep ? options.sleep(ms) : new Promise(() => {}); } },
     command: { register: async spec => { calls.commands.push(spec); }, list: async () => options.commands ?? [] },
     config: { list: async () => { calls.configs++; return rows; } },
     settings: { read: async () => options.settings ?? {} },
@@ -20,7 +25,8 @@ function host(options = {}) {
       calls.processes.push({ argv, init });
       if (options.process) return options.process(argv, init);
       const candidates = JSON.parse(init.stdin).decisions.subagent;
-      const selected = candidates.find(item => item.model === (options.choice ?? 'haiku'));
+      const selected = candidates.find(item => item.model === (options.choice ?? 'haiku')
+        && (options.effort === undefined || item.effort === options.effort));
       return { exitCode: 0, stderr: '', stdout: JSON.stringify({ status: 'recommended',
         decisions: { subagent: { choice: selected.id, model: selected.model, effort: selected.effort,
           confidence: 0.9 } } }) };
@@ -60,8 +66,44 @@ async function spawn(h, e = child(), actual = 'claude-haiku-test') {
   return input;
 }
 
+// Runs the parent's Agent tool call around its spawn, as the host does.
+async function agentCall(h, e, args, inner = () => spawn(h, e)) {
+  return h.event('tool.call', { tool: 'Agent', tool_use_id: e.tool_use_id, agentId: e.parentAgentId,
+    description: e.description, prompt: e.prompt, ...args }, inner);
+}
+
+// Drives one turn.step generator; returns the request it sent down and the result.
+async function step(h, e) {
+  const sent = [];
+  const body = h.event('turn.step', e, async function* (input) {
+    sent.push(input); yield { kind: 'text', text: 'ok' };
+    return { turnId: input.turnId, index: input.index, answer: 'ok', toolUses: [] };
+  });
+  const chunks = [];
+  let item;
+  while (!(item = await body.next()).done) chunks.push(item.value);
+  assert.deepEqual(chunks, [{ kind: 'text', text: 'ok' }]);
+  assert.equal(sent.length, 1);
+  return { sent: sent[0], result: item.value };
+}
+
+function stepEvent(agentId, extra = {}) {
+  return { turnId: 'turn', index: 0, model: 'claude-haiku-test', effort: 'high', messageCount: 1,
+    ...(agentId === undefined ? {} : { agentId }), ...extra };
+}
+
+const EFFORTS = ['low', 'medium', 'high', 'xhigh', 'max'];
+const models = candidates => [...new Set(candidates.map(item => item.model))];
+
 const allOff = /skill=off subagent=off/;
 const allOn = /skill=on subagent=on/;
+
+test('the engine can list every environment variable the module reads', () => {
+  const source = readFileSync(new URL('../claude/register.js', import.meta.url), 'utf8');
+  const reads = [...source.matchAll(/\$\.env\.get\(([^)]*)\)/g)].map(match => match[1]);
+  assert.ok(reads.length);
+  for (const name of reads) assert.match(name, /^'[A-Z_]+'$/);
+});
 
 test('a human exclusion blocks later combined spawns in this conversation', async () => {
   const h = host();
@@ -203,15 +245,89 @@ test('combined skill and subagent routing uses one agent-prepared batch without 
   assert.equal(h.calls.processes.length, 1);
 });
 
-test('main-turn events have no routing hooks and keep the model and dispatch unchanged', async () => {
-  const h = host(); await h.command('on');
-  for (const name of ['turn.start', 'turn.step', 'turn.complete']) {
+test('main-turn events keep the model, effort and dispatch unchanged', async () => {
+  const h = host({ effort: 'low' }); await h.command('on subagent');
+  for (const name of ['turn.start', 'turn.complete']) {
     assert.equal(h.hooks.has(name), false);
     const e = { turnId: 'main', text: 'Use another model', model: 'opus', effort: 'max' };
     const got = await h.event(name, e);
     assert.equal(got, e); assert.equal(got.model, 'opus'); assert.equal(got.effort, 'max');
   }
-  assert.equal(h.calls.processes.length, 0); assert.equal(h.calls.configs, 0);
+  await spawn(h);
+  const main = stepEvent(undefined, { model: 'opus', effort: 'max' });
+  const { sent, result } = await step(h, main);
+  assert.equal(sent, main); assert.equal(result.answer, 'ok');
+  const unknown = stepEvent('another-child');
+  assert.equal((await step(h, unknown)).sent, unknown);
+  assert.equal(h.calls.processes.length, 1); assert.equal(h.calls.sleeps.length, 0);
+});
+
+test('turn.step applies the selected effort to every model request of the routed child', async () => {
+  const h = host({ effort: 'xhigh' }); await h.command('on subagent');
+  await spawn(h);
+  for (const index of [0, 1, 2]) {
+    const e = stepEvent('child-id', { index });
+    const { sent, result } = await step(h, e);
+    assert.deepEqual(sent, { ...e, effort: 'xhigh' }); assert.equal(result.index, index);
+  }
+  assert.equal(h.calls.logs.filter(text => text.includes('effort requested=xhigh actual=unverified')).length, 1);
+  assert.match((await h.command('status')).text,
+    /effort requested=xhigh actual=unverified \(the host lowers an unsupported effort without reporting it\)/);
+  assert.ok(!(await h.command('status')).text.includes('applied'));
+});
+
+test('a child model without effort is sent none and reports that actual effort', async () => {
+  const h = host({ effort: 'low' }); await h.command('on subagent'); await spawn(h);
+  const e = stepEvent('child-id', { effort: undefined }); delete e.effort;
+  assert.equal((await step(h, e)).sent, e);
+  assert.match((await h.command('status')).text, /effort requested=low actual=none \(the model takes no effort\)/);
+});
+
+test('CLAUDE_CODE_EFFORT_LEVEL locks effort: model-only candidates and no step rewrite', async () => {
+  const h = host({ effortEnv: 'medium' }); await h.command('on subagent');
+  assert.equal((await spawn(h)).model, 'haiku');
+  const candidates = JSON.parse(h.calls.processes[0].init.stdin).decisions.subagent;
+  assert.deepEqual(candidates.map(item => item.effort), [null, null, null]);
+  const e = stepEvent('child-id', { effort: 'medium' });
+  assert.equal((await step(h, e)).sent, e);
+  assert.ok(h.calls.logs.some(text => text.includes('effort locked by CLAUDE_CODE_EFFORT_LEVEL')));
+  assert.match((await h.command('status')).text, /effort locked by CLAUDE_CODE_EFFORT_LEVEL/);
+});
+
+test('a child step that arrives before its spawn answers waits for the effort mapping', async () => {
+  const h = host({ effort: 'max' }); await h.command('on subagent');
+  let answer;
+  const dispatched = h.event('agent.spawn', child(), async () => new Promise(done => { answer = done; }));
+  while (!answer) await new Promise(done => setImmediate(done));
+  const early = step(h, stepEvent('child-id'));
+  await new Promise(done => setImmediate(done));
+  assert.deepEqual(h.calls.sleeps, [3000]);
+  answer({ model: 'claude-haiku-test', agentId: 'child-id' });
+  assert.equal((await early).sent.effort, 'max');
+  await dispatched;
+  const timedOut = host({ effort: 'max', sleep: async () => {} }); await timedOut.command('on subagent');
+  timedOut.event('agent.spawn', child(), async () => new Promise(() => {}));
+  await new Promise(done => setImmediate(done));
+  const e = stepEvent('slow-child');
+  assert.equal((await step(timedOut, e)).sent, e);
+});
+
+test('a resumed child keeps its agentId and its selected effort', async () => {
+  const h = host({ effort: 'low' }); await h.command('on subagent'); await spawn(h);
+  const resume = child('resume-call', { resume: { agentId: 'child-id' } });
+  let resumed;
+  await h.event('agent.spawn', resume, async input => { resumed = input; return { model: 'claude-haiku-test', agentId: 'child-id' }; });
+  assert.equal(resumed, resume);
+  assert.equal((await step(h, stepEvent('child-id', { index: 5 }))).sent.effort, 'low');
+  assert.equal(h.calls.processes.length, 1);
+});
+
+test('a spawn without a stable ID routes the model only', async () => {
+  const h = host(); await h.command('on subagent');
+  await spawn(h, child(undefined, { tool_use_id: undefined }));
+  const candidates = JSON.parse(h.calls.processes[0].init.stdin).decisions.subagent;
+  assert.ok(candidates.every(item => item.effort === null));
+  assert.equal((await step(h, stepEvent('child-id'))).sent.effort, 'high');
 });
 
 test('one stable spawn routes once and reuses its choice through repeated dispatches', async () => {
@@ -230,30 +346,34 @@ test('one stable spawn routes once and reuses its choice through repeated dispat
   assert.ok(!call.init.stdin.includes(e.prompt));
 });
 
-test('native candidates are atomic model/default-effort options with opaque IDs', async () => {
-  const h = host(); await h.command('on subagent');
+test('native candidates are atomic model/effort options with opaque IDs', async () => {
+  const h = host({ effort: 'medium' }); await h.command('on subagent');
   const applied = await spawn(h);
   assert.equal(applied.model, 'haiku'); assert.equal(Object.hasOwn(applied, 'effort'), false);
   const candidates = JSON.parse(h.calls.processes[0].init.stdin).decisions.subagent;
-  assert.deepEqual(candidates.map(item => item.model), ['sonnet', 'opus', 'haiku']);
+  assert.deepEqual(candidates.map(item => [item.model, item.effort]),
+    ['sonnet', 'opus', 'haiku'].flatMap(model => EFFORTS.map(effort => [model, effort])));
   for (const item of candidates) {
     assert.deepEqual(Object.keys(item).sort(), ['description', 'effort', 'id', 'model']);
-    assert.notEqual(item.id, item.model); assert.equal(item.effort, null);
+    assert.notEqual(item.id, item.model); assert.match(item.description, /lowers or drops/);
   }
-  assert.ok(h.calls.logs.some(text => text.includes('no verified per-spawn effort control')));
-  assert.ok(h.calls.logs.some(text => text.includes('effort=host-controlled')));
+  assert.ok(h.calls.logs.some(text => text.includes('effort requested=medium actual=awaiting first request')));
+  assert.match((await h.command('status')).text, /effort requested=medium actual=awaiting first request/);
   const prompt = await h.event('prompt.submit', { text: 'Continue' });
-  assert.match(prompt.context[0], /Native candidates currently use effort:null/);
-  assert.match(prompt.context[0], /environment or organization policy/);
+  assert.ok(!prompt.context[0].includes('no verified per-spawn effort control'));
+  assert.match(prompt.context[0], /Native candidates pair each offered model with low, medium, high, xhigh and max/);
+  assert.match(prompt.context[0], /CLAUDE_CODE_EFFORT_LEVEL/);
 });
 
-test('a global effort row is not expanded into an unsupported per-model matrix', () => {
+test('native candidates use every effort level per model regardless of the session effort row', () => {
   const candidates = modelCandidates([
     { key: 'model', kind: 'choice', isLocked: false, value: 'sonnet', options: ['sonnet', 'haiku'] },
     { key: 'effort', kind: 'choice', isLocked: false, value: 'max', options: ['low', 'max'] },
   ]);
-  assert.equal(candidates.length, 2);
-  assert.ok(candidates.every(item => item.effort === null));
+  assert.deepEqual(candidates.map(item => [item.model, item.effort]),
+    ['sonnet', 'haiku'].flatMap(model => EFFORTS.map(effort => [model, effort])));
+  assert.deepEqual(modelCandidates([{ key: 'model', kind: 'choice', isLocked: false, options: ['haiku'] }],
+    undefined, new Set(), [null]).map(item => item.effort), [null]);
 });
 
 test('a recommendation cannot substitute a model or effort outside the chosen atomic option', async () => {
@@ -261,6 +381,8 @@ test('a recommendation cannot substitute a model or effort outside the chosen at
     { choice: 'subagent-2', model: 'opus', effort: null, confidence: 0.9 },
     { choice: 'subagent-2', model: 'haiku', effort: 'low', confidence: 0.9 },
     { choice: 'haiku', model: 'haiku', effort: null, confidence: 0.9 },
+    { choice: 'subagent-10', model: 'haiku', effort: 'max', confidence: 0.9 },
+    { choice: 'subagent-10', model: 'haiku', effort: null, confidence: 0.9 },
   ]) {
     const h = host({ process: async () => ({ exitCode: 0, stderr: '', stdout: JSON.stringify({
       status: 'recommended', decisions: { subagent } }) }) });
@@ -273,9 +395,11 @@ test('a recommendation cannot substitute a model or effort outside the chosen at
 
 test('explicit effort remains unchanged without guessing a compatible model', async () => {
   const h = host(); await h.command('on subagent');
-  const e = child('explicit-effort', { effort: 'low' });
-  assert.equal(await spawn(h, e, 'sonnet'), e);
+  const e = child('explicit-effort');
+  assert.equal(await agentCall(h, e, { effort: 'low' }, () => spawn(h, e, 'sonnet')), e);
   assert.equal(h.calls.processes.length, 0);
+  const own = stepEvent('child-id', { effort: 'low' });
+  assert.equal((await step(h, own)).sent, own);
   assert.ok(h.calls.logs.some(text => text.includes('explicit effort has no verified compatible model inventory')));
   const prompt = await h.event('prompt.submit', { text: 'Continue with my fixed effort' });
   assert.match(prompt.context[0], /user fixed effort and compatible models cannot be verified/);
@@ -285,9 +409,21 @@ test('explicit effort remains unchanged without guessing a compatible model', as
   assert.equal(await spawn(h, continuation, 'sonnet'), continuation);
   assert.equal(h.calls.processes.length, 0);
   await h.command('on skill');
-  const prepared = child('prepared-pair', { model: 'haiku', effort: 'medium' });
-  assert.equal(await spawn(h, prepared), prepared);
+  const prepared = child('prepared-pair', { model: 'haiku' });
+  assert.equal(await agentCall(h, prepared, { model: 'haiku', effort: 'medium' }), prepared);
   assert.equal(h.calls.processes.length, 0);
+});
+
+test('only the Agent tool call reveals explicit effort; the spawn input has no effort field', async () => {
+  const h = host({ effort: 'max' }); await h.command('on subagent');
+  const other = { tool: 'Read', tool_use_id: 'spawn-1', file_path: 'note.txt', effort: 'low' };
+  assert.equal(await h.event('tool.call', other), other);
+  assert.equal((await spawn(h)).model, 'haiku');
+  assert.equal(h.calls.processes.length, 1);
+  assert.equal((await step(h, stepEvent('child-id'))).sent.effort, 'max');
+  const nested = child('nested', { parentAgentId: 'child-id' });
+  assert.equal(await agentCall(h, nested, { effort: 'low' }, () => spawn(h, nested, 'sonnet')), nested);
+  assert.equal(h.calls.processes.length, 1);
 });
 
 test('combined default-effort preparation preserves model and skills without a second routing call', async () => {
@@ -311,7 +447,7 @@ test('concurrent dispatches of one spawn share the in-flight routing promise', a
   await new Promise(done => setImmediate(done));
   assert.equal(h.calls.processes.length, 1);
   resolve({ exitCode: 0, stdout: JSON.stringify({ status: 'recommended', decisions: {
-    subagent: { choice: 'subagent-2', model: 'haiku', effort: null, confidence: 0.9 } } }), stderr: '' });
+    subagent: { choice: 'subagent-10', model: 'haiku', effort: 'low', confidence: 0.9 } } }), stderr: '' });
   assert.equal((await a).model, 'haiku'); assert.equal((await b).model, 'haiku');
 });
 
@@ -430,7 +566,7 @@ test('live inventory filters virtual modes, context suffixes, duplicates and pri
   const candidates = modelCandidates([{ key: 'model', kind: 'choice', isLocked: false,
     options: ['default', 'sonnet', 'opus', 'haiku', 'fable', 'best', 'opusplan', 'sonnet[1m]',
       'claude-opus-test', 'arn:aws:private', '/private/model', 'custom/name', 'sonnet'] }]);
-  assert.deepEqual(candidates.map(item => item.model), ['sonnet', 'opus', 'haiku', 'fable', 'claude-opus-test']);
+  assert.deepEqual(models(candidates), ['sonnet', 'opus', 'haiku', 'fable', 'claude-opus-test']);
   assert.deepEqual(modelCandidates([{ key: 'model', kind: 'choice', isLocked: true, options: ['sonnet'] }]), []);
   assert.deepEqual(modelCandidates([{ key: 'model', kind: 'text', options: ['sonnet'] }]), []);
 });
@@ -444,7 +580,7 @@ test('locked, absent or restricted inventory falls back without API and is not r
     assert.ok(h.calls.logs.some(text => /unavailable|locked/.test(text)));
   }
   const h = host({ settings: { availableModels: ['haiku'] } }); await h.command('on subagent'); await spawn(h);
-  assert.deepEqual(JSON.parse(h.calls.processes[0].init.stdin).decisions.subagent.map(item => item.model), ['haiku']);
+  assert.deepEqual(models(JSON.parse(h.calls.processes[0].init.stdin).decisions.subagent), ['haiku']);
 });
 
 test('each independent spawn reads fresh candidates without rerouting earlier units', async () => {
@@ -452,7 +588,7 @@ test('each independent spawn reads fresh candidates without rerouting earlier un
   h.rows([{ key: 'model', kind: 'choice', isLocked: false, options: ['haiku'] }]);
   await spawn(h, child('two')); await spawn(h, child('one'));
   assert.equal(h.calls.configs, 2);
-  assert.deepEqual(JSON.parse(h.calls.processes[1].init.stdin).decisions.subagent.map(item => item.model), ['haiku']);
+  assert.deepEqual(models(JSON.parse(h.calls.processes[1].init.stdin).decisions.subagent), ['haiku']);
 });
 
 test('feature summaries contain no source text, code, secret values or private paths', () => {
@@ -484,10 +620,10 @@ test('manual exclude/include is human-only, atomic, key-free and never enables r
 test('family exclusions filter aliases and full IDs while unknown quotas stay eligible', () => {
   const rows = [{ key: 'model', kind: 'choice', isLocked: false,
     options: ['fable', 'claude-fable-5-1', 'sonnet', 'claude-3-5-sonnet-20241022', 'haiku', 'opus'] }];
-  assert.equal(modelCandidates(rows).length, 6);
-  assert.deepEqual(modelCandidates(rows, undefined, new Set(['claude-fable-5-1'])).map(item => item.model),
+  assert.equal(models(modelCandidates(rows)).length, 6);
+  assert.deepEqual(models(modelCandidates(rows, undefined, new Set(['claude-fable-5-1']))),
     ['sonnet', 'claude-3-5-sonnet-20241022', 'haiku', 'opus']);
-  assert.deepEqual(modelCandidates(rows, undefined, ['sonnet', 'fable']).map(item => item.model), ['haiku', 'opus']);
+  assert.deepEqual(models(modelCandidates(rows, undefined, ['sonnet', 'fable'])), ['haiku', 'opus']);
 });
 
 test('known exclusions guard fresh and cached native/combined choices without new routing or dispatch', async () => {
@@ -513,8 +649,8 @@ test('future native decisions omit manually excluded families and keep other mod
   await h.command('on subagent'); await h.command('exclude fable');
   assert.equal((await spawn(h)).model, 'haiku');
   const request = JSON.parse(h.calls.processes[0].init.stdin);
-  assert.deepEqual(request.decisions.subagent.map(item => item.model), ['haiku']);
-  assert.ok(request.decisions.subagent.every(item => item.effort === null));
+  assert.deepEqual(models(request.decisions.subagent), ['haiku']);
+  assert.deepEqual(request.decisions.subagent.map(item => item.effort), EFFORTS);
 });
 
 test('host quota failures pass through once without automatic exclusions or replay', async () => {

@@ -39,7 +39,7 @@ cd skills && ./scripts/link-skills.sh
 
 呼叫語法：plugin 裝法要帶 namespace（`/shuaigle:grill`）；skills.sh 或 symlink 裝法用裸名（`/grill`）；Codex 用 `$grill`，或由 description 自動觸發。
 
-依賴說明：`diagnosing-bugs` 的架構交棒會用環境裡既有的 audit skill（如 `improve`），沒有就以文字報告代替。`review` 預設開 fresh-context subagent 審，harness 不支援時自己審，並在報告開頭的來源行註明。spec 與 tickets 都是本地檔案。`jev` 需要 Python 3、網路與環境變數 `JEV_API_KEY`，呼叫 TypeSafe API。Claude Code 原生 subagent 模型路由需要 `2.1.287+`，並以 plugin 方式載入本 repo 的 mod；symlink／skills.sh 只安裝 skill，不會載入 mod。開發時可用 `claude --plugin-dir .`。
+依賴說明：`diagnosing-bugs` 的架構交棒會用環境裡既有的 audit skill（如 `improve`），沒有就以文字報告代替。`review` 預設開 fresh-context subagent 審，harness 不支援時自己審，並在報告開頭的來源行註明。spec 與 tickets 都是本地檔案。`jev` 需要 Python 3、網路與環境變數 `JEV_API_KEY`，呼叫 TypeSafe API。Claude Code 原生 subagent 模型路由需要 `2.1.287+`，effort 路由在 `2.1.302` 驗證過，並以 plugin 方式載入本 repo 的 mod；symlink／skills.sh 只安裝 skill，不會載入 mod。開發時可用 `claude --plugin-dir .`。
 
 ## Skills
 
@@ -68,7 +68,7 @@ cd skills && ./scripts/link-skills.sh
 
 Codex hooks 在涵蓋的工具路徑上要求先取得子任務決策，路由前依宿主的逐模型能力清單驗證候選組合，再把已準備的 spawn 改為 Jev 選出的模型與 `reasoning_effort`；null 會清除舊 effort 欄位。快取保留目前對話的旗標、雜湊與最小決策，不保存金鑰、原始任務或 child brief；路由失敗也會重用該次 fallback。resume／compact 保留狀態，新的、fork 或 clear 對話重設全關。hooks 無法辨識所有語意上的任務邊界，特殊工具是否涵蓋取決於宿主，需在實際宿主確認。
 
-Claude 原生 mod 載入後，只有 `subagent` 開啟時由 mod 在預定 spawn 前詢問 Jev，依該次 spawn 的識別重用成功或失敗決策；status 回報推薦與實際子模型。目前 native spawn 介面沒有可驗證的 effort 覆寫欄位／逐模型能力清單，該路徑用 null，effort 仍由宿主控制。這不代表 Claude 的其他派工介面不能設定 effort。
+Claude 原生 mod 載入後，只有 `subagent` 開啟時由 mod 在預定 spawn 前詢問 Jev，依該次 spawn 的識別重用成功或失敗決策；候選是每個可用模型各配 `low`／`medium`／`high`／`xhigh`／`max`；mod 在 `agent.spawn` 套用模型，再以 `turn.step` 改寫該子 agent 每次 model request 的 effort。宿主遇到模型不支援的 effort 會靜默降級或不送，hook 看不到結果，所以 status 回報推薦與實際子模型、requested effort，actual effort 標為 unverified。主 agent 在 Agent tool 明確傳 effort、設了 `CLAUDE_CODE_EFFORT_LEVEL`，或 spawn 沒有穩定 ID 時，mod 不改寫 effort。
 
 工具 enum、模型選單與組織 allowlist 不代表剩餘 credits；未知額度仍可路由。Claude native 的排除清單只由人輸入 `/jev exclude <models...>`、`/jev include <models...>` 改動，不需 API key，也不改啟用旗標。額度錯誤不會自動排除模型；使用者可在失敗後 exclude、恢復後 include。Include 只解除本地排除，不驗證額度。已知模型家族的 alias 與版本 ID 共用排除範圍，排除其中一個會排除整個家族。
 
