@@ -33,10 +33,10 @@ Break the work into **tracer bullet** tickets.
 
 <vertical-slice-rules>
 
-- Each slice cuts a narrow but COMPLETE path through every layer (schema, API, UI, tests) — vertical, NOT a horizontal slice of one layer
+- Each slice cuts a narrow but COMPLETE path through only the layers required by the spec — vertical, NOT a horizontal slice of one layer
 - A completed slice is demoable or verifiable on its own
 - Each slice is sized to fit in a single fresh context window
-- Any prefactoring should be done first
+- Put prefactoring first only when the source spec supports it and it addresses a concrete obstacle to delivering the slice
 
 </vertical-slice-rules>
 
@@ -86,7 +86,7 @@ Every criterion carries a command and the output that means it passed. The execu
 
 - [ ] Criterion — verify: `<command>` → <expected output>
 
-Where you cannot write the command, the slice is drawn wrong. Push the check down to something observable: an exit code, a matched string, a diff against a golden file. Failing that, cut the ticket where a machine can see the seam.
+Where you cannot write the command, first use an existing entry point and an observable result: an exit code, a matched string, a diff against a golden file. If that still leaves a verification gap, report it and stop for spec revision. New seams or architecture require a decision in the source spec; ticket generation cannot add them to make verification possible.
 
 ## STOP if
 

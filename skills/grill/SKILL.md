@@ -6,11 +6,13 @@ argument-hint: "[docs] <plan or decision>"
 
 # Grill
 
-Interview me relentlessly about every aspect of the plan until we reach a shared understanding. Keep the decision tree in conversation context: settled decisions, open decisions, and their prerequisites. Bare grill requires no new artifact.
+Interview me relentlessly about the decisions needed for the current delivery, its correctness, or known constraints until we reach a shared understanding. Keep the decision tree in conversation context: settled decisions, open decisions, their prerequisites, and deferred branches. Defer branches that do not affect those decisions. Bare grill requires no new artifact.
 
 The **frontier** contains the open decisions whose prerequisites are settled. Ask one frontier question at a time, provide your recommended answer, and wait for my answer before continuing. Questions that depend on an unsettled decision wait; do not guess that answer.
 
 Phrase each question in everyday language: state the concrete choice, its effect, and your recommendation. Define a technical term in one sentence when the decision depends on it.
+
+When choosing a design, use the [design criteria in codebase-design](../codebase-design/SKILL.md#design-criteria).
 
 After each answer, update the tree and frontier. If an earlier answer changes, reopen the downstream decisions it invalidates and confirm them again.
 
@@ -18,7 +20,7 @@ If a *fact* can be found by exploring the environment (filesystem, tools, etc.),
 
 When a decision needs runnable evidence, suggest `prototype-logic` and bring its findings back into the decision tree.
 
-Finish when every known branch is settled and no assumptions remain silently accepted. Summarize the decisions and ask me to confirm our shared understanding. Do not act on the plan until I confirm.
+Finish when every decision needed for the current delivery is settled and its assumptions are explicit. Summarize the decisions, name deferred branches, and ask me to confirm our shared understanding. Do not act on the plan until I confirm.
 
 ## Question UI
 

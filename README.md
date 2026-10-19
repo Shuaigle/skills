@@ -45,17 +45,17 @@ cd skills && ./scripts/link-skills.sh
 
 | Skill | 觸發 | 用途 |
 |---|---|---|
-| [grill](./skills/grill/SKILL.md) | model | 追蹤決策前提與未決事項，優先用選項 UI 一次問一題；`grill docs` 同時維護詞彙與決策記錄（預設 CONTEXT.md 與 docs/adr/） |
+| [grill](./skills/grill/SKILL.md) | model | 聚焦本次交付、正確性與已知限制的必要決策，優先用選項 UI 一次問一題；`grill docs` 同時維護詞彙與決策記錄（預設 CONTEXT.md 與 docs/adr/） |
 | [prototype-logic](./skills/prototype-logic/SKILL.md) | model | 用可操作的單檔 HTML 驗證一個邏輯或狀態模型問題，支援自由操作、重設與情境演練 |
-| [to-spec](./skills/to-spec/SKILL.md) | user | 把目前對話收斂成自足的 spec，寫入 `.scratch/<feature>/spec.md` |
-| [to-tickets](./skills/to-tickets/SKILL.md) | user | 把 spec 純轉譯成 tracer-bullet tickets（可工作的縱切）：自足、可跑的驗證準則、STOP 條件、blocking 關係 |
+| [to-spec](./skills/to-spec/SKILL.md) | user | 把已確認需求收斂成自足、可驗收的 spec，寫入 `.scratch/<feature>/spec.md` |
+| [to-tickets](./skills/to-tickets/SKILL.md) | user | 把 spec 純轉譯成 tracer-bullet tickets（可工作的縱切）：自足、可跑的驗證準則、STOP 條件、blocking 關係；前置重構須有具體阻擋證據 |
 | [implement](./skills/implement/SKILL.md) | user | 照 spec/tickets 實作：drift check、`tdd`、跑指令驗收、授權後 commit；不自審，收尾指向 `review` |
 | [review](./skills/review/SKILL.md) | user | 在沒寫過這段 code 的 session 三軸審 diff（含未 commit 與 untracked）：Spec、Correctness、Standards 分開報告；作者的設計文件只當待驗證的說法；逐條開檔驗證，外部 review 意見也走同一套 |
 | [to-docs](./skills/to-docs/SKILL.md) | user | 實作 commit 後沉澱：詞彙與夠格的決策寫進 repo 既有文檔，逐項提議處理脫鉤記錄，文檔獨立 commit |
 | [retro](./skills/retro/SKILL.md) | user | 從 session 的實際摩擦提出 agent 環境改善；機械錯誤優先變成自動檢查，判斷問題才補規範 |
 | [tdd](./skills/tdd/SKILL.md) | model | 紅綠循環；seam（模組介面所在、測試穿過的位置）先議定，只測外部行為 |
 | [diagnosing-bugs](./skills/diagnosing-bugs/SKILL.md) | model | 先建 tight feedback loop（可快速重現的明確紅綠訊號），再查原因 |
-| [codebase-design](./skills/codebase-design/SKILL.md) | model | Deep module 詞彙與原則：小介面隱藏大量行為，並選定清楚的 seam |
+| [codebase-design](./skills/codebase-design/SKILL.md) | model | 從直接方案出發，新增機制須有當前需求或限制的依據；Deep module 詞彙、小介面與 seam 原則 |
 | [handoff](./skills/handoff/SKILL.md) | user | 把對話壓縮成交接文檔給下一個 agent |
 | [writing-great-skills](./skills/writing-great-skills/SKILL.md) | user | 寫與改 skill 的參考：invocation 取捨、資訊層級、環境真相、剪枝、leading words、失效模式 |
 | [jev](./skills/jev/SKILL.md) | user | 使用者啟用後選零到多個 skills 與 subagent 模型／effort 組合，每個獨立子任務只問一次；Claude native 支援在本對話手動排除模型，未知額度仍可路由 |

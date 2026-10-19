@@ -20,16 +20,14 @@ Show this to the user, then immediately proceed to Step 2. The user reads and th
 
 ### 2. Spawn sub-agents
 
-Spawn 3+ sub-agents in parallel using the harness's sub-agent mechanism. No sub-agent support? Work through the same briefs yourself, sequentially, one design at a time. Each must produce a **radically different** interface for the deepened module.
+Start with two sub-agents using the harness's sub-agent mechanism. No sub-agent support? Work through the same briefs yourself, one design at a time. Both designs must satisfy the same confirmed requirements; add another only to resolve a specific trade-off.
 
 Prompt each sub-agent with a separate technical brief (file paths, coupling details, dependency category from [DEEPENING.md](DEEPENING.md), what sits behind the seam). The brief is independent of the user-facing problem-space explanation in Step 1. Give each agent a different design constraint:
 
-- Agent 1: "Minimize the interface — aim for 1–3 entry points max. Maximise leverage per entry point."
-- Agent 2: "Maximise flexibility — support many use cases and extension."
-- Agent 3: "Optimise for the most common caller — make the default case trivial."
-- Agent 4 (if applicable): "Design around ports & adapters for cross-seam dependencies."
+- Agent 1: "Give the direct baseline using the existing structure and interfaces where possible."
+- Agent 2: "Explore a different interface for the same requirements; name the concrete limitation of the direct approach it addresses."
 
-Include both [SKILL.md](SKILL.md) vocabulary and the relevant vocabulary record in the brief so each sub-agent names things consistently.
+Include [SKILL.md](SKILL.md)'s design criteria and vocabulary, plus the relevant vocabulary record, in each brief.
 
 Each sub-agent outputs:
 
@@ -45,4 +43,4 @@ Present designs sequentially so the user can absorb each one, then compare them 
 
 For the user, explain these as the public surface, hidden behaviour, change location, and where the module interface lives.
 
-After comparing, give your own recommendation: which design you think is strongest and why. If elements from different designs would combine well, propose a hybrid. Be opinionated — the user wants a strong read, not a menu.
+Recommend one design using [SKILL.md](SKILL.md#design-criteria)'s criteria. A hybrid needs a concrete shortcoming that neither design alone addresses.

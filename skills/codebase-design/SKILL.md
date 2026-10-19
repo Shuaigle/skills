@@ -1,6 +1,6 @@
 ---
 name: codebase-design
-description: Shared vocabulary for designing deep modules. Use when the user wants to design or improve a module's interface, find deepening opportunities, decide where a seam goes, make code more testable or AI-navigable, or when another skill needs the deep-module vocabulary.
+description: Simple, deep modules — shared vocabulary and design criteria. Use when the user wants to design or improve a module's interface, find deepening opportunities, decide where a seam goes, make code more testable or AI-navigable, or when another skill needs these criteria or vocabulary.
 ---
 
 # Codebase Design
@@ -8,6 +8,13 @@ description: Shared vocabulary for designing deep modules. Use when the user wan
 Design **deep modules**: a lot of behaviour behind a small interface, placed at a clean seam, testable through that interface. Use this language and these principles wherever code is being designed or restructured. The aim is leverage for callers, locality for maintainers, and testability for everyone.
 
 When speaking to the user, pair each term with the concrete code it describes: the public entry points and the invariants, ordering, errors, configuration, and performance facts callers must know; the behaviour hidden behind them; where tests enter; and where a change would be made.
+
+## Design criteria
+
+- Start with the simplest design that satisfies confirmed behaviour and constraints, using existing structure where available.
+- For each added layer, extension point, dependency, or runtime component, identify the current requirement, observed failure, or necessary constraint the direct design cannot satisfy.
+- Among designs that satisfy those needs, prefer fewer concepts to understand, coordinate, and operate. Line count is not the measure.
+- Finish when confirmed behaviour and constraints are covered and every added mechanism has that justification. Defer hypothetical needs.
 
 ## Glossary
 
@@ -34,8 +41,7 @@ Use these terms exactly — don't substitute "component," "service," "API," or "
 - **Depth is a property of the interface, not the implementation.** A deep module can be internally composed of small, mockable, swappable parts — they just aren't part of the interface. A module can have **internal seams** used by its own tests; those seams stay private.
 - **The deletion test.** Imagine deleting the module. If complexity vanishes, it was a pass-through. If complexity reappears across N callers, it was earning its keep.
 - **The interface is the test surface.** Callers and tests cross the same seam. If you want to test *past* the interface, the module is probably the wrong shape.
-- **Return results through the interface; keep side effects behind adapters.**
-- **One adapter means a hypothetical seam.** A seam becomes real when at least two adapters are justified, typically production and test.
+- **Adapters isolate effects.** Return results through the interface; reuse existing seams and add adapters for concrete isolation or substitution needs.
 
 ## Rejected framings
 
