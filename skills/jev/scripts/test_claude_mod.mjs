@@ -1,17 +1,32 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { register, summarizeTask, modelCandidates } from '../claude/register.js';
-import { readFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync } from 'node:fs';
+import { spawnSync } from 'node:child_process';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+
+const SCRIPTS = new URL('.', import.meta.url).pathname;
+const HELPER = '/test/plugin/skills/jev/scripts/claude_route.py';
+
+// Runs the real receipt helper with a private state directory and no API key.
+function python(args, stdin, state, env = {}) {
+  const run = spawnSync('python3', args, { cwd: SCRIPTS, input: stdin, encoding: 'utf8',
+    env: { ...process.env, JEV_API_KEY: '', CLAUDE_CODE_SESSION_ID: '', JEV_CLAUDE_STATE_DIR: state, ...env } });
+  return { exitCode: run.status, stdout: run.stdout, stderr: run.stderr };
+}
 
 function host(options = {}) {
   const hooks = new Map();
   const matchers = new Map();
-  const calls = { processes: [], logs: [], commands: [], env: 0, configs: 0, sleeps: [] };
+  const calls = { processes: [], claims: [], logs: [], commands: [], env: 0, configs: 0, sleeps: [] };
+  const state = options.state ?? mkdtempSync(join(tmpdir(), 'jev-claude-test-'));
   let rows = options.rows ?? [{ key: 'model', kind: 'choice', isLocked: false,
     options: ['default', 'sonnet', 'opus', 'haiku', 'best', 'opusplan', 'opus[1m]'] }];
   let key = options.key === undefined ? 'synthetic-test-key' : options.key;
   const $ = {
     plugin: { root: '/test/plugin' },
+    session: { id: async () => options.session ?? 'session-a' },
     env: { get: async name => {
       if (name === 'CLAUDE_CODE_EFFORT_LEVEL') return options.effortEnv;
       assert.equal(name, 'JEV_API_KEY'); calls.env++; return key;
@@ -22,6 +37,10 @@ function host(options = {}) {
     settings: { read: async () => options.settings ?? {} },
     ui: { log: text => { calls.logs.push(text); } },
     process: { run: async (argv, init) => {
+      if (argv[1] === HELPER) {
+        calls.claims.push({ argv, init });
+        return options.claim ? options.claim(argv, init) : python(['claude_route.py', ...argv.slice(2)], init.stdin, state);
+      }
       calls.processes.push({ argv, init });
       if (options.process) return options.process(argv, init);
       const candidates = JSON.parse(init.stdin).decisions.subagent;
@@ -50,7 +69,38 @@ function host(options = {}) {
     if (!started) await event('session.start', {});
     return event('command.run', { command: name, args, origin: { kind: origin } });
   };
-  return { $, hooks, calls, event, command, rows: value => { rows = value; }, key: value => { key = value; } };
+  return { $, hooks, calls, event, command, state, session: options.session ?? 'session-a',
+    rows: value => { rows = value; }, key: value => { key = value; } };
+}
+
+// The agent's begin step: the real helper with a stubbed router answer or failure.
+function prepare(h, { original = { model: null, effort: null }, answer, error, skip, subagent = [
+  { id: 'fast', model: 'haiku', effort: 'low', description: 'Fast child' },
+  { id: 'deep', model: 'opus', effort: 'high', description: 'Deep child' }] } = {}) {
+  const skills = [{ id: 'testing', description: 'Write behavioral tests' }];
+  const decisions = skip ? { skill: skills } : { skill: skills, subagent };
+  const stub = error ? { error } : { status: 'recommended', host: 'Claude Code', router_model: 'jev-test',
+    decisions: { skill: { choices: ['testing'], evaluations: {} },
+      ...(skip ? {} : { subagent: { choice: answer ?? subagent[0].id, confidence: 0.9 } }) } };
+  const code = 'import json,os,sys,route,claude_route\n'
+    + 'stub=json.loads(os.environ["JEV_TEST_ROUTE"])\n'
+    + 'def fake(data):\n    if "error" in stub: raise route.RoutingError(stub["error"])\n    return stub\n'
+    + 'route.route=fake\nsys.exit(claude_route.main(["begin"]))';
+  const input = { session_id: h.session, original, request: { host: 'Claude Code',
+    task: 'Review a bounded module', decisions }, ...(skip ? { skip_subagent: skip } : {}) };
+  const run = python(['-c', code], JSON.stringify(input), h.state, { JEV_TEST_ROUTE: JSON.stringify(stub) });
+  assert.equal(run.exitCode, 0, run.stdout + run.stderr);
+  return JSON.parse(run.stdout);
+}
+
+function briefed(id, receipt, extra = {}) {
+  return child(id, { prompt: `Review the module.\n${receipt.brief_line}\nReport findings.`,
+    ...(receipt.model === null ? {} : { model: receipt.model }), ...extra });
+}
+
+// A combined spawn as the agent issues it: Agent.model and Agent.effort from the receipt.
+async function combined(h, e, effort, inner) {
+  return agentCall(h, e, effort === null || effort === undefined ? {} : { effort }, inner);
 }
 
 function child(id = 'spawn-1', extra = {}) {
@@ -221,28 +271,148 @@ test('all-off and skill-only native behavior make no model requests', async () =
   assert.equal(h.calls.processes.length, 0);
 });
 
-test('combined skill and subagent routing uses one agent-prepared batch without a native request', async () => {
+test('combined routing applies a matching receipt without a native request', async () => {
   const h = host(); await h.command('on');
-  const prepared = child('prepared', { model: 'haiku', prompt: 'Review; prepared skills: testing, security' });
-  assert.equal(await spawn(h, prepared), prepared);
-  const fallback = child('fallback');
-  assert.equal(await spawn(h, fallback, 'sonnet'), fallback);
-  assert.equal(await spawn(h, { ...fallback }, 'sonnet').then(value => value.model), undefined);
+  const receipt = prepare(h);
+  assert.deepEqual([receipt.status, receipt.model, receipt.effort, receipt.skills], ['recommended', 'haiku', 'low', ['testing']]);
+  const e = briefed('prepared', receipt);
+  assert.equal(await combined(h, e, 'low'), e);
+  assert.equal(await spawn(h, { ...e }).then(value => value.model), 'haiku');
+  let count = 0;
+  assert.match((await h.event('agent.spawn', { ...e, model: 'opus' }, async () => { count++; })).deny,
+    /expected model=haiku/);
+  assert.equal(count, 0);
+  assert.equal(h.calls.claims.length, 1, 'repeated events of one spawn reuse its claim');
+  const claim = JSON.parse(h.calls.claims[0].init.stdin);
+  assert.deepEqual(h.calls.claims[0].argv, ['python3', HELPER, 'claim']);
+  assert.deepEqual(claim, { session_id: 'session-a', receipt_id: receipt.receipt_id,
+    spawn: JSON.stringify([null, 'prepared']), model: 'haiku', effort: 'low', brief_line: receipt.brief_line });
   assert.equal(h.calls.processes.length, 0); assert.equal(h.calls.configs, 0);
-  assert.equal(h.calls.logs.filter(text => text.includes('unset model keeps inheritance')).length, 1);
+  assert.match((await h.command('status')).text,
+    new RegExp(`last subagent receipt=${receipt.receipt_id} requested=haiku actual=claude-haiku-test effort requested=low skills=testing`));
   const prompt = await h.event('prompt.submit', { text: 'Continue the child work' });
   assert.match(prompt.context[0], /one combined Jev batch per child unit/);
   assert.match(prompt.context[0], /native hook never reroutes this combined path/);
   assert.match(prompt.context[0], /report effort-routing unavailable/);
   assert.match(prompt.context[0], /keep model and skill decisions in that same batch/);
   assert.match(prompt.context[0], /effort:null means omit Agent.effort and use host-controlled effort/);
-  assert.ok(!prompt.context[0].includes('reuse ordinary fallback for the unit instead of asking Jev'));
   assert.match(prompt.context[0], /concrete effort is this skill's explicit per-invocation instruction/);
+  assert.ok(prompt.context[0].includes(`python3 '${HELPER}' begin`));
+  assert.ok(prompt.context[0].includes('"session_id":"session-a"'));
+  assert.match(prompt.context[0], /brief_line verbatim/);
+  assert.match(prompt.context[0], /denies/);
   await h.command('off skill');
-  assert.equal(await spawn(h, fallback, 'sonnet'), fallback);
+  assert.equal((await spawn(h, child('native-after-off'))).model, 'haiku');
+  assert.equal(h.calls.processes.length, 1, 'subagent-only mode keeps native routing');
+  assert.equal(h.calls.claims.length, 1);
+  assert.ok(!(await h.event('prompt.submit', { text: 'x' })).context[0].includes(HELPER));
+});
+
+test('combined routing denies a spawn without a routing receipt and names the helper', async () => {
+  const h = host(); await h.command('on all');
+  const receipt = prepare(h);
+  const unknown = receipt.brief_line.replace(receipt.receipt_id, 'r-0000000000000000');
+  let count = 0;
+  for (const [e, reason] of [
+    [child('no-line', { model: 'sonnet' }), /no "Jev routing: " line/],
+    [child('unset'), /no "Jev routing: " line/],
+    [child('twice', { model: 'haiku', prompt: `${receipt.brief_line}\n${receipt.brief_line}` }), /2 "Jev routing: " lines/],
+    [child('garbled', { model: 'haiku', prompt: 'Jev routing: {receipt' }), /unreadable/],
+    [child('unknown', { model: 'haiku', prompt: unknown }), /no routing receipt r-0000000000000000/],
+  ]) {
+    const result = await combined(h, e, 'low', () => h.event('agent.spawn', e, async () => { count++; }));
+    assert.match(result.deny, reason);
+    assert.ok(result.deny.includes(`python3 '${HELPER}' begin`));
+  }
+  assert.equal(count, 0); assert.equal(h.calls.processes.length, 0);
+  assert.equal(await combined(h, briefed('valid', receipt), 'low').then(value => value.model), 'haiku');
+});
+
+test('a spawn whose model, effort or brief differs from its receipt is denied without consuming it', async () => {
+  const h = host(); await h.command('on');
+  const receipt = prepare(h);
+  let count = 0;
+  for (const [e, effort, reason] of [
+    [briefed('model', receipt, { model: 'sonnet' }), 'low', /model=haiku effort=low/],
+    [briefed('model-unset', receipt, { model: undefined }), 'low', /model=haiku effort=low/],
+    [briefed('effort', receipt), 'high', /model=haiku effort=low/],
+    [briefed('effort-unset', receipt), null, /model=haiku effort=low/],
+    [briefed('brief', receipt, { prompt: receipt.brief_line.replace('testing', 'docs') }), 'low', /brief line/],
+  ]) {
+    const result = await combined(h, e, effort, () => h.event('agent.spawn', e, async () => { count++; }));
+    assert.match(result.deny, reason);
+    assert.ok(result.deny.includes(receipt.brief_line));
+  }
+  assert.equal(count, 0);
+  assert.equal((await combined(h, briefed('matching', receipt), 'low')).model, 'haiku');
+});
+
+test('a failed routing receipt permits only the original spawn settings', async () => {
+  const h = host(); await h.command('on');
+  const failed = prepare(h, { error: 'network_error', original: { model: 'sonnet', effort: 'medium' } });
+  assert.deepEqual([failed.status, failed.code, failed.model, failed.effort, failed.skills],
+    ['fallback', 'network_error', 'sonnet', 'medium', []]);
+  const e = briefed('fallback', failed);
+  assert.equal(await combined(h, e, 'medium'), e);
+  assert.ok(h.calls.logs.some(text => text.includes(`routing failed (network_error); receipt ${failed.receipt_id} keeps the original spawn settings`)));
+  assert.match((await h.command('status')).text, /routing=fallback\(network_error\)/);
+  const unset = prepare(h, { error: 'missing_api_key' });
+  assert.equal((await combined(h, briefed('fallback-unset', unset), null)).model, undefined);
+  const other = prepare(h, { error: 'http_error', original: { model: 'sonnet', effort: null } });
+  const swapped = briefed('swapped', other, { model: 'opus' });
+  assert.match((await combined(h, swapped, null, () => h.event('agent.spawn', swapped, async () => {}))).deny,
+    /model=sonnet effort=null/);
+  const fixed = prepare(h, { skip: 'fixed_effort_unverified', original: { model: 'opus', effort: 'max' } });
+  assert.deepEqual([fixed.status, fixed.model, fixed.effort, fixed.skills], ['recommended', 'opus', 'max', ['testing']]);
+  assert.equal((await combined(h, briefed('fixed', fixed), 'max')).model, 'opus');
   assert.equal(h.calls.processes.length, 0);
-  assert.equal((await spawn(h, child('new-native-child'))).model, 'haiku');
-  assert.equal(h.calls.processes.length, 1);
+});
+
+test('a receipt serves one spawn in its own session only', async () => {
+  const a = host(); await a.command('on');
+  const receipt = prepare(a);
+  await combined(a, briefed('first', receipt), 'low');
+  const second = briefed('second', receipt);
+  let count = 0;
+  assert.match((await combined(a, second, 'low', () => a.event('agent.spawn', second, async () => { count++; }))).deny,
+    /already used by another spawn/);
+  const unkeyed = briefed(undefined, receipt, { tool_use_id: undefined });
+  assert.match((await a.event('agent.spawn', unkeyed, async () => { count++; })).deny, /already used/);
+  const b = host({ session: 'session-b', state: a.state }); await b.command('on');
+  const foreign = prepare(a);
+  const e = briefed('foreign', foreign);
+  assert.match((await combined(b, e, 'low', () => b.event('agent.spawn', e, async () => { count++; }))).deny,
+    /no routing receipt/);
+  assert.equal(count, 0);
+  assert.equal((await combined(a, briefed('own-session', foreign), 'low')).model, 'haiku');
+  const restarted = host({ state: a.state }); await restarted.command('on');
+  const reused = briefed('after-reload', receipt);
+  assert.match((await combined(restarted, reused, 'low', () => restarted.event('agent.spawn', reused, async () => { count++; }))).deny,
+    /already used/, 'a module reload does not revive a consumed receipt');
+  assert.equal(count, 0);
+});
+
+test('fork, resume and workflow spawns pass through combined routing without a receipt', async () => {
+  const h = host(); await h.command('on');
+  for (const e of [child('fork', { fork: true }), child('resume', { resume: { agentId: 'x' } }),
+    child('workflow', { workflow: { runId: 'wf', agentIndex: 0 } })]) {
+    assert.equal(await spawn(h, e, 'sonnet'), e);
+  }
+  assert.equal(h.calls.claims.length, 0); assert.equal(h.calls.processes.length, 0);
+});
+
+test('an unavailable receipt helper blocks combined spawns and says how to proceed', async () => {
+  for (const claim of [async () => ({ exitCode: 1, stdout: 'Traceback', stderr: 'boom' }),
+    async () => { throw new Error('python3 missing'); }]) {
+    const h = host({ claim }); await h.command('on');
+    const e = child('helper-down', { model: 'haiku', prompt: prepare(host(), {}).brief_line });
+    let count = 0;
+    const result = await combined(h, e, 'low', () => h.event('agent.spawn', e, async () => { count++; }));
+    assert.match(result.deny, /receipt check failed/);
+    assert.match(result.deny, /\/jev off skill/);
+    assert.equal(count, 0);
+    assert.ok(!result.deny.includes('Traceback'));
+  }
 });
 
 test('main-turn events keep the model, effort and dispatch unchanged', async () => {
@@ -409,7 +579,8 @@ test('explicit effort remains unchanged without guessing a compatible model', as
   assert.equal(await spawn(h, continuation, 'sonnet'), continuation);
   assert.equal(h.calls.processes.length, 0);
   await h.command('on skill');
-  const prepared = child('prepared-pair', { model: 'haiku' });
+  const receipt = prepare(h, { skip: 'fixed_effort_unverified', original: { model: 'haiku', effort: 'medium' } });
+  const prepared = briefed('prepared-pair', receipt);
   assert.equal(await agentCall(h, prepared, { model: 'haiku', effort: 'medium' }), prepared);
   assert.equal(h.calls.processes.length, 0);
 });
@@ -426,11 +597,17 @@ test('only the Agent tool call reveals explicit effort; the spawn input has no e
   assert.equal(h.calls.processes.length, 1);
 });
 
-test('combined default-effort preparation preserves model and skills without a second routing call', async () => {
+test('combined default-effort receipts leave Agent.effort unset without a second routing call', async () => {
   const h = host(); await h.command('on');
-  const prepared = child('combined-default', { model: 'haiku', prompt: 'Prepared skills: testing, security' });
-  assert.equal(await spawn(h, prepared), prepared);
+  const receipt = prepare(h, { subagent: [{ id: 'model-only', model: 'haiku', effort: null,
+    description: 'Haiku; effort capability unavailable' }] });
+  assert.deepEqual([receipt.model, receipt.effort], ['haiku', null]);
+  const prepared = briefed('combined-default', receipt);
+  assert.equal(await combined(h, prepared, null), prepared);
   assert.equal(await spawn(h, { ...prepared }).then(value => value.model), 'haiku');
+  const pinned = briefed('combined-pinned', prepare(h, { subagent: [{ id: 'model-only', model: 'haiku',
+    effort: null, description: 'Haiku; effort capability unavailable' }] }));
+  assert.ok((await combined(h, pinned, 'low', () => h.event('agent.spawn', pinned, async () => {}))).deny);
   assert.equal(h.calls.processes.length, 0);
   assert.equal(h.calls.configs, 0);
   assert.equal(Object.hasOwn(prepared, 'effort'), false);
@@ -631,7 +808,8 @@ test('known exclusions guard fresh and cached native/combined choices without ne
   const h = host({ rows, choice: 'fable' }); await h.command('on subagent');
   await spawn(h, child('cached-native'), 'claude-fable-5-1');
   await h.command('on skill');
-  await spawn(h, child('cached-combined', { model: 'fable' }), 'claude-fable-5-1');
+  const receipt = prepare(h, { subagent: [{ id: 'fable', model: 'fable', effort: null, description: 'Fable' }] });
+  await combined(h, briefed('cached-combined', receipt), null, () => spawn(h, briefed('cached-combined', receipt), 'claude-fable-5-1'));
   await h.command('exclude fable');
   let count = 0;
   for (const e of [child('cached-combined'), child('fresh', { model: 'claude-fable-5-1' })]) {

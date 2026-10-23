@@ -26,7 +26,7 @@ For Codex subagents, inspect the currently exposed spawn tool's model and `reaso
 
 ## Claude Code
 
-When this plugin's native mod is loaded on a supported version, use [native Claude routing](claude-native.md). Native commands own the flags. The mod routes children when only `subagent` is enabled; with `skill` also enabled, the agent prepares one combined child batch before spawning.
+When this plugin's native mod is loaded on a supported version, use [native Claude routing](claude-native.md). Native commands own the flags. The mod routes children when only `subagent` is enabled; with `skill` also enabled, the agent prepares one combined child batch through the receipt helper before spawning, and the mod denies a spawn without a matching receipt.
 
 For Claude subagents, inspect the current delegation tool's model and effort capabilities and accepted aliases. Account, provider, and organization restrictions determine policy eligibility; a public catalog is insufficient. They do not establish remaining credits. Preserve field values exactly as that spawn accepts them and verify effort support for each model. Apply native session exclusions to every effort option for an excluded model. If selection is fixed in agent configuration, report the constraint and retain it. Editing global settings or an agent definition does not establish a one-spawn override.
 

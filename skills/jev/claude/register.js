@@ -5,6 +5,7 @@ const USER_ORIGINS = ['composer', 'bridge', 'sdk'];
 const EFFORTS = ['low', 'medium', 'high', 'xhigh', 'max'];
 // A child's first model request can precede its spawn's answer; wait this long for the agentId.
 const PENDING_WAIT_MS = 3000;
+const BRIEF_PREFIX = 'Jev routing: ';
 
 export function parseControl(args) {
   const words = args.trim().split(/\s+/).filter(Boolean);
@@ -125,6 +126,60 @@ async function chooseSubagent($, text, unavailable, stableId) {
   }
 }
 
+function receiptHelper(root) {
+  return `${root}/skills/jev/scripts/claude_route.py`;
+}
+
+function shellQuote(text) {
+  return `'${text.replaceAll("'", "'\\''")}'`;
+}
+
+function beginHint(root) {
+  return `Before this spawn run python3 ${shellQuote(receiptHelper(root))} begin (see its --help), then put its `
+    + 'brief_line verbatim in the Agent prompt and its model and effort in Agent.model and Agent.effort.';
+}
+
+function receiptDenial(code, id, expected) {
+  const copy = typeof expected?.brief_line === 'string' ? ` Expected line: ${expected.brief_line}` : '';
+  switch (code) {
+    case 'receipt_missing': return `no routing receipt ${id} in this session.`;
+    case 'receipt_expired': return `routing receipt ${id} expired.`;
+    case 'receipt_used': return `routing receipt ${id} was already used by another spawn.`;
+    case 'brief_mismatch': return `the brief line differs from routing receipt ${id}.${copy}`;
+    case 'receipt_mismatch': return `Agent.model/Agent.effort differ from routing receipt ${id}: expected `
+      + `model=${expected?.model ?? 'unset'} effort=${expected?.effort ?? 'null'}.${copy}`;
+    default: return undefined;
+  }
+}
+
+// Combined routing is agent-prepared; the receipt proves claude_route.py begin ran for this spawn.
+async function claimReceipt($, e, key, effort) {
+  const lines = (typeof e.prompt === 'string' ? e.prompt : '').split('\n')
+    .map(line => line.trim()).filter(line => line.startsWith(BRIEF_PREFIX));
+  const refuse = reason => ({ deny: `Jev: combined routing ${reason} ${beginHint($.plugin.root)}` });
+  if (lines.length !== 1) {
+    return refuse(lines.length ? `found ${lines.length} "${BRIEF_PREFIX}" lines in this Agent prompt; keep exactly one.`
+      : `found no "${BRIEF_PREFIX}" line in this Agent prompt.`);
+  }
+  let id;
+  try { id = JSON.parse(lines[0].slice(BRIEF_PREFIX.length)).receipt; } catch { /* Refused below. */ }
+  if (typeof id !== 'string') return refuse(`found an unreadable "${BRIEF_PREFIX}" line.`);
+  let answer;
+  try {
+    const result = await $.process.run(['python3', receiptHelper($.plugin.root), 'claim'], {
+      stdin: JSON.stringify({ session_id: await $.session.id(), receipt_id: id, spawn: key ?? null,
+        model: e.model ?? null, effort: effort ?? null, brief_line: lines[0] }),
+      timeoutMs: 5000,
+    });
+    answer = JSON.parse(result.stdout);
+  } catch { /* Refused below. */ }
+  if (answer?.status === 'ok' && answer.receipt && typeof answer.receipt === 'object') return { id, receipt: answer.receipt };
+  const denial = receiptDenial(answer?.code, id, answer?.expected);
+  if (denial) return refuse(denial);
+  return { deny: 'Jev: combined routing receipt check failed; dispatch blocked. Retry the spawn, '
+    + 'or ask the user to run /jev off skill to leave combined routing.' };
+}
+
 async function childEffort($, agentId, childEfforts, pendingSpawns) {
   if (agentId === undefined) return undefined;
   if (!childEfforts.has(agentId) && pendingSpawns.size) {
@@ -144,12 +199,13 @@ export function register(on) {
   // Jev-selected effort by child agentId, applied to each of that child's model requests.
   const childEfforts = new Map();
   const pendingSpawns = new Set();
-  let lastEvidence;
+  let lastEvidence, sessionId, root;
   let serveBareCommand = false;
 
   function reset() {
     enabled.clear(); spawns.clear(); unavailable.clear(); agentCalls.clear(); childEfforts.clear();
     pendingSpawns.clear(); lastEvidence = undefined; serveBareCommand = false;
+    sessionId = undefined; root = undefined;
   }
 
   function flags() {
@@ -175,6 +231,7 @@ export function register(on) {
       + 'If the user fixed effort and compatible models cannot be verified, preserve the original model and '
       + 'that effort, route only optional skills, and never replace the user\'s value with null. '
       + 'Reuse a failed batch as inheritance and ordinary skills; the native hook never reroutes this combined path. '
+      + combinedReceipts()
       + 'When skill=off and subagent=on, native hooks choose the child model and effort; omit Agent.model and Agent.effort unless the user fixed them. '
       + 'Native candidates pair each offered model with low, medium, high, xhigh and max; the mod applies the chosen '
       + 'effort to each of that child\'s model requests. The host silently lowers or drops an effort the model does '
@@ -187,6 +244,20 @@ export function register(on) {
       + 'Explicit user choices and mandatory skill rules still apply.';
   }
 
+  function combinedReceipts() {
+    if (!enabled.has('skill') || !enabled.has('subagent') || !root) return '';
+    const session = sessionId === undefined ? '' : `"session_id":${JSON.stringify(sessionId)},`;
+    return 'The mod enforces combined routing with receipts: before each new non-fork Agent spawn, run '
+      + `python3 ${shellQuote(receiptHelper(root))} begin with JSON stdin {${session}"original":{"model":<planned `
+      + 'model or null>,"effort":<planned effort or null>},"request":<one route.py batch with skill and subagent '
+      + 'decisions>}; read its --help for skip_subagent and fields. Put its brief_line verbatim as one line of the '
+      + 'Agent prompt, set Agent.model to its model and Agent.effort to its effort, omitting each when null, and have '
+      + 'the child load its skills. A failed route still returns a fallback receipt that keeps the original settings; '
+      + 'report it. The mod denies a spawn without exactly one such line, with an unknown, expired or used receipt, '
+      + 'or with a different model, effort or line; each receipt serves one spawn for 30 minutes. Give a child that '
+      + 'may delegate this command and session ID. ';
+  }
+
   function status() {
     return `Jev (current session): ${flags()}`
       + `; unavailable=${[...unavailable].sort().join(',') || 'none'}`
@@ -195,6 +266,8 @@ export function register(on) {
 
   on('session.start', async ($, e, next) => {
     reset();
+    root = $.plugin.root;
+    try { sessionId = await $.session.id(); } catch { /* The helper falls back to CLAUDE_CODE_SESSION_ID. */ }
     const existing = (await $.command.list()).find(command => command.name === 'jev');
     if (!existing) {
       await $.command.register({ name: 'jev', description: 'Configure Jev routing for this session',
@@ -266,21 +339,44 @@ export function register(on) {
     if (excluded(e.model, unavailable)) return { deny: `Jev: ${exclusionKey(e.model)} is unavailable in this conversation; dispatch blocked.` };
     let state = key && spawns.get(key);
     let choice;
-    if (enabled.has('skill')) {
-      // The agent prepares skill + model in one batch; unset is its cached fallback.
+    // A spawn already routed natively before skill was enabled keeps that decision.
+    if (enabled.has('skill') && (!state || state.claim)) {
       if (!state) {
-        state = { choice: Promise.resolve(e.model === undefined ? undefined : { model: e.model, effort: explicitEffort ?? null }),
-          reported: false };
+        state = { claim: claimReceipt($, e, key, explicitEffort), reported: false };
         if (key) spawns.set(key, state);
       }
-      if (e.model === undefined && !state.reported) {
+      const claimed = await state.claim;
+      if (claimed.deny) {
+        // A refused claim consumed nothing; a later event of this spawn may claim again.
+        if (key && spawns.get(key) === state) spawns.delete(key);
+        return { deny: claimed.deny };
+      }
+      const { receipt } = claimed;
+      if (excluded(e.model ?? receipt.model, unavailable)) {
+        return { deny: `Jev: ${exclusionKey(e.model ?? receipt.model)} is unavailable in this conversation; cached dispatch blocked.` };
+      }
+      // A repeated event of a claimed spawn must still carry the receipt's model.
+      if ((e.model ?? null) !== receipt.model) {
+        return { deny: `Jev: Agent.model differs from routing receipt ${claimed.id}: expected model=${receipt.model ?? 'unset'}.` };
+      }
+      const routing = receipt.status === 'fallback' ? `fallback(${receipt.code})` : 'recommended';
+      if (receipt.status === 'fallback' && !state.failureReported) {
+        state.failureReported = true;
+        safeLog($, `Jev subagent: routing failed (${receipt.code}); receipt ${claimed.id} keeps the original spawn settings.`);
+      }
+      const result = await next(e);
+      if (result?.model && !state.reported) {
         state.reported = true;
-        safeLog($, 'Jev subagent: combined routing uses the agent-prepared batch; unset model keeps inheritance.');
+        lastEvidence = `subagent receipt=${claimed.id} requested=${receipt.model ?? 'inherited'} `
+          + `actual=${reportedModel(result.model)} effort requested=${receipt.effort ?? 'host-controlled'} `
+          + `skills=${Array.isArray(receipt.skills) && receipt.skills.length ? receipt.skills.join(',') : 'none'} routing=${routing}`;
+        safeLog($, `Jev ${lastEvidence}`);
       }
-      const prepared = await state.choice;
-      if (excluded(e.model ?? prepared?.model, unavailable)) {
-        return { deny: `Jev: ${exclusionKey(e.model ?? prepared.model)} is unavailable in this conversation; cached dispatch blocked.` };
-      }
+      return result;
+    } else if (state?.claim) {
+      // A receipt-claimed spawn repeated after skill was disabled keeps its receipt's pair.
+      const { receipt } = await state.claim;
+      choice = receipt && { model: receipt.model, effort: receipt.effort };
     } else if (e.model !== undefined) {
       choice = { model: e.model, effort: explicitEffort ?? null };
     } else if (explicitEffort !== undefined) {

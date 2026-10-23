@@ -74,7 +74,7 @@ Claude 原生 mod 載入後，只有 `subagent` 開啟時由 mod 在預定 spawn
 
 `subagent` 開啟時，Claude native 過濾新子任務候選並在派工前重查準備及快取選擇；resume、fork、workflow 沿用宿主行為，不受這項 guard 保護。關閉時暫停檢查但保留清單，新 session／module 重載／結束時重設。它不會自行換成另一模型或重播失敗工作。排除變更後保留已選 skills 與 brief，以新 routing unit／revision 交 Jev 選更新後的候選，避免重播可能已有副作用的工作。Codex gate 不提供這兩個原生命令或額度檢查。
 
-Claude 內建 Agent 工具在 `2.1.292+` 支援非 fork 的逐次 effort。兩項全開時，agent 對 child unit 一次批次詢問 skill＋模型／effort 選項；有可信矩陣時精確套用 Jev 選出的 `Agent.model`／`Agent.effort`，skills 放入 brief。缺矩陣時仍用已驗證模型的 `effort: null` 選項與 skills 同批詢問，effort 留給宿主預設並明示未路由；不能把工具的 effort enum 直接乘上全部模型。Mod 不再問第二次；API 或回應驗證失敗時整批沿用原設定。這個混合流程依賴 agent 準備，沒有原生 receipt 強制檢查。只開 `skill` 或本地工作由 agent 選 skills 並重用。旗標只存在記憶體，mod 重載或 session 結束即重設。詳見 [Claude 路由](./skills/jev/references/claude-native.md)。
+Claude 內建 Agent 工具在 `2.1.292+` 支援非 fork 的逐次 effort。兩項全開時，agent 對 child unit 一次批次詢問 skill＋模型／effort 選項；有可信矩陣時精確套用 Jev 選出的 `Agent.model`／`Agent.effort`，skills 放入 brief。缺矩陣時仍用已驗證模型的 `effort: null` 選項與 skills 同批詢問，effort 留給宿主預設並明示未路由；不能把工具的 effort enum 直接乘上全部模型。Agent 透過 `claude_route.py begin` 詢問並取得收據，把收據的 `brief_line` 原樣放進 brief；mod 在 spawn 時核對收據，缺收據、收據過期（30 分鐘）、已被其他 spawn 用過，或模型／effort／brief 行不符就拒絕派送，不再問第二次。API 或回應驗證失敗時寫失敗收據，整批沿用原設定，可與「沒跑」區分。收據存在使用者私有暫存目錄、以 session 分開，不含金鑰、任務或 prompt。只開 `skill` 或本地工作由 agent 選 skills 並重用。旗標只存在記憶體，mod 重載或 session 結束即重設。詳見 [Claude 路由](./skills/jev/references/claude-native.md)。
 
 典型流程：`grill docs` 對齊 → `to-spec` 出規格 → `to-tickets` 拆票 → `implement` 實作（內部走 `tdd`）→ 換 session（最好換模型）跑 `review` → `to-docs` 沉澱 → 卡住用 `diagnosing-bugs`。
 
