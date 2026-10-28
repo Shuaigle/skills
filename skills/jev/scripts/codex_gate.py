@@ -141,6 +141,35 @@ def locked_state(session_id, state_dir=None):
         os.replace(temporary, state_path)
 
 
+def flags_root(state_dir):
+    # Saved flags outlive sessions; hook-only PLUGIN_DATA keeps them clear of temp-directory cleanup.
+    if state_dir is None and not os.environ.get("JEV_CODEX_STATE_DIR") and os.environ.get("PLUGIN_DATA"):
+        return prepare_root(os.environ["PLUGIN_DATA"])
+    return prepare_root(state_dir)
+
+
+def saved_flags(state_dir):
+    """Returns the last human-set scopes, or None when nothing readable was saved."""
+    try:
+        with os.fdopen(secure_open(flags_root(state_dir) / "flags.json", os.O_RDONLY), "rb") as source:
+            data = json.loads(source.read(4096))
+    except (OSError, ValueError, GateError):
+        return None
+    if not isinstance(data, dict) or not isinstance(data.get("enabled"), list):
+        return None
+    return sorted({scope for scope in data["enabled"] if isinstance(scope, str) and scope in SCOPES})
+
+
+def save_flags(enabled, state_dir):
+    root = flags_root(state_dir)
+    fd, temporary = tempfile.mkstemp(prefix="flags.", suffix=".tmp", dir=str(root))
+    with os.fdopen(fd, "wb") as destination:
+        destination.write(json.dumps({"enabled": enabled}).encode())
+        destination.flush()
+        os.fsync(destination.fileno())
+    os.replace(temporary, root / "flags.json")
+
+
 def context(event_name, message):
     return {"hookSpecificOutput": {"hookEventName": event_name,
                                    "additionalContext": message}}
@@ -203,6 +232,10 @@ def handle_hook(event, state_dir=None):
             if event.get("source", "startup") not in {"resume", "compact"}:
                 state.clear()
                 state.update(blank_state())
+            # The last human control holds across conversations; without a key saved flags stay off.
+            saved = saved_flags(state_dir)
+            if saved is not None and route.valid_text(os.environ.get("JEV_API_KEY"), 4096):
+                state["enabled"] = saved
             return {}
         if name == "SessionEnd":
             state.clear()
@@ -228,6 +261,11 @@ def handle_hook(event, state_dir=None):
                     state["enabled"] = sorted(set(state["enabled"]) | scopes)
                 elif action == "off":
                     state["enabled"] = sorted(set(state["enabled"]) - scopes)
+                if action in {"on", "off"} and warning is None:
+                    try:
+                        save_flags(state["enabled"], state_dir)
+                    except (OSError, GateError):
+                        warning = "flags_not_saved; the change applies to this conversation only."
                 return bootstrap_context(event, state, warning)
             return bootstrap_context(event, state) if state["enabled"] else {}
         if not state["enabled"]:
@@ -495,7 +533,8 @@ HELP = """usage: codex_gate.py hook|begin < JSON
 
 hook accepts trusted Codex SessionStart, SessionEnd, UserPromptSubmit,
 PreToolUse and Stop events. Only an anchored first-line human jev control in
-UserPromptSubmit changes skill/subagent flags. New conversations are off.
+UserPromptSubmit changes skill/subagent flags. The last on/off control is saved
+and restored at every conversation start while JEV_API_KEY is set.
 Bare jev on and jev on all enable both. The retired task control is invalid.
 
 begin fields:

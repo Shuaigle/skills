@@ -24,9 +24,18 @@ function host(options = {}) {
   let rows = options.rows ?? [{ key: 'model', kind: 'choice', isLocked: false,
     options: ['default', 'sonnet', 'opus', 'haiku', 'best', 'opusplan', 'opus[1m]'] }];
   let key = options.key === undefined ? 'synthetic-test-key' : options.key;
+  const store = options.store ?? new Map();
   const $ = {
     plugin: { root: '/test/plugin' },
     session: { id: async () => options.session ?? 'session-a' },
+    // The plugin store outlives sessions; hosts that share one Map stand for later sessions.
+    store: {
+      get: async name => { if (options.storeFails) throw new Error('store unavailable'); return store.get(name); },
+      set: async (name, value) => {
+        if (options.storeFails) throw new Error('store unavailable');
+        store.set(name, JSON.parse(JSON.stringify(value)));
+      },
+    },
     env: { get: async name => {
       if (name === 'CLAUDE_CODE_EFFORT_LEVEL') return options.effortEnv;
       assert.equal(name, 'JEV_API_KEY'); calls.env++; return key;
@@ -69,7 +78,7 @@ function host(options = {}) {
     if (!started) await event('session.start', {});
     return event('command.run', { command: name, args, origin: { kind: origin } });
   };
-  return { $, hooks, calls, event, command, state, session: options.session ?? 'session-a',
+  return { $, hooks, calls, event, command, state, store, session: options.session ?? 'session-a',
     rows: value => { rows = value; }, key: value => { key = value; } };
 }
 
@@ -155,11 +164,11 @@ test('the engine can list every environment variable the module reads', () => {
   for (const name of reads) assert.match(name, /^'[A-Z_]+'$/);
 });
 
-test('a human exclusion blocks later combined spawns in this conversation', async () => {
+test('a human exclusion blocks later combined spawns', async () => {
   const h = host();
   await h.command('on all');
   const excluded = await h.command('exclude fable');
-  assert.match(excluded.context[0], /Manually excluded models in this conversation: fable/);
+  assert.match(excluded.context[0], /Manually excluded models: fable/);
   assert.match(excluded.context[0], /Only explicit human exclude\/include commands change this list/);
   let dispatches = 0;
   const result = await h.event('agent.spawn', child('another-child', { model: 'fable' }),
@@ -730,13 +739,53 @@ test('disabling routing skips cached choices and reenabling does not retry consu
   assert.equal(h.calls.processes.length, 1);
 });
 
-test('session state is isolated and end clears flags and cached routing', async () => {
+test('separate stores stay isolated and a session end clears cached routing but keeps saved flags', async () => {
   const a = host(), b = host(); await a.command('on subagent'); await spawn(a);
   assert.match((await b.command('status')).text, allOff);
   await a.event('session.end', {});
-  assert.match((await a.command('status')).text, allOff);
-  await a.command('on subagent'); await spawn(a);
+  assert.match((await a.command('status')).text, /skill=off subagent=on/);
+  await spawn(a);
   assert.equal(a.calls.processes.length, 2);
+});
+
+test('the last explicit command persists flags and exclusions into later sessions', async () => {
+  const store = new Map();
+  const first = host({ store }); await first.command('on all'); await first.command('exclude fable');
+  const later = host({ store }); await later.event('session.start', {});
+  assert.match((await later.command('status')).text, /skill=on subagent=on; unavailable=fable/);
+  await later.command('off skill'); await later.command('include fable');
+  assert.deepEqual(store.get('routing'), { enabled: ['subagent'], unavailable: [] });
+  const reloaded = host({ store }); await reloaded.event('session.start', {});
+  assert.match((await reloaded.command('status')).text, /skill=off subagent=on; unavailable=none/);
+});
+
+test('exclusions merge with what other sessions saved and flags follow the last command', async () => {
+  const store = new Map();
+  const a = host({ store }), b = host({ store });
+  await a.event('session.start', {}); await b.event('session.start', {});
+  await a.command('exclude fable'); await b.command('exclude opus');
+  await a.command('on subagent'); await b.command('off');
+  assert.deepEqual(store.get('routing'), { enabled: [], unavailable: ['fable', 'opus'] });
+  assert.match((await a.command('status')).text, /subagent=on; unavailable=fable$/, 'a running session reads the store at start');
+  const later = host({ store }); await later.event('session.start', {});
+  assert.match((await later.command('status')).text, /skill=off subagent=off; unavailable=fable,opus/);
+});
+
+test('saved flags stay off without JEV_API_KEY while saved exclusions still apply', async () => {
+  const store = new Map([['routing', { enabled: ['skill', 'subagent', 'task'], unavailable: ['fable', '/private/id'] }]]);
+  const h = host({ store, key: '' }); await h.event('session.start', {});
+  const text = (await h.command('status')).text;
+  assert.match(text, /skill=off subagent=off; unavailable=fable; saved skill,subagent off until JEV_API_KEY is set/);
+  assert.ok(h.calls.logs.some(line => line.includes('JEV_API_KEY is missing')));
+  assert.deepEqual(store.get('routing').enabled, ['skill', 'subagent', 'task'], 'status and restore never rewrite the store');
+});
+
+test('an unavailable store keeps changes in this session and reports them unsaved', async () => {
+  const h = host({ storeFails: true });
+  assert.match((await h.command('on subagent')).text, /subagent=on; unavailable=none; not saved/);
+  assert.match((await h.command('exclude fable')).text, /unavailable=fable; not saved/);
+  assert.ok(h.calls.logs.some(line => line.includes('unreadable')));
+  assert.ok(h.calls.logs.some(line => line.includes('could not be saved')));
 });
 
 test('live inventory filters virtual modes, context suffixes, duplicates and private IDs', () => {
@@ -851,7 +900,7 @@ test('host quota failures pass through once without automatic exclusions or repl
   }
 });
 
-test('off pauses dispatch guards but retains manual exclusions until this session ends', async () => {
+test('off pauses dispatch guards but retains manual exclusions across sessions', async () => {
   const h = host(); await h.command('on all'); await h.command('exclude fable'); await h.command('off');
   const e = child('off-allowed', { model: 'fable' }); assert.equal(await spawn(h, e, 'fable'), e);
   assert.match((await h.command('status')).text, /unavailable=fable/);
@@ -861,5 +910,5 @@ test('off pauses dispatch guards but retains manual exclusions until this sessio
   assert.ok((await h.event('agent.spawn', e, async () => { count++; })).deny);
   assert.equal(count, 0);
   const other = host(); assert.match((await other.command('status')).text, /unavailable=none/);
-  await h.event('session.end', {}); assert.match((await h.command('status')).text, /unavailable=none/);
+  await h.event('session.end', {}); assert.match((await h.command('status')).text, /unavailable=fable/);
 });

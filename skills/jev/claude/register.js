@@ -5,6 +5,8 @@ const USER_ORIGINS = ['composer', 'bridge', 'sdk'];
 const EFFORTS = ['low', 'medium', 'high', 'xhigh', 'max'];
 // A child's first model request can precede its spawn's answer; wait this long for the agentId.
 const PENDING_WAIT_MS = 3000;
+// Flags and exclusions live in the plugin store: the last explicit command holds across sessions.
+const STORE_KEY = 'routing';
 const BRIEF_PREFIX = 'Jev routing: ';
 
 export function parseControl(args) {
@@ -35,6 +37,13 @@ function exclusionKey(model) {
 
 function excluded(model, unavailable) {
   return unavailable.has(exclusionKey(model));
+}
+
+// Drops unknown scopes and non-canonical exclusions from a stored record.
+function storedRouting(value) {
+  const list = (items, valid) => Array.isArray(items) ? [...new Set(items.filter(valid))] : [];
+  return { enabled: list(value?.enabled, item => SCOPES.includes(item)),
+    unavailable: list(value?.unavailable, item => exclusionKey(item) === item).sort() };
 }
 
 function spawnKey(parentId, toolId) {
@@ -190,6 +199,34 @@ async function childEffort($, agentId, childEfforts, pendingSpawns) {
   return childEfforts.get(agentId);
 }
 
+// Restores the saved routing into this session; saved scopes stay off without JEV_API_KEY.
+async function restoreRouting($, enabled, unavailable, blocked) {
+  let saved;
+  try { saved = storedRouting(await $.store.get(STORE_KEY)); } catch {
+    safeLog($, 'Jev: saved routing state is unreadable; flags start off and exclusions start empty.');
+    return;
+  }
+  for (const model of saved.unavailable) unavailable.add(model);
+  if (!saved.enabled.length) return;
+  let keyPresent = false;
+  try { keyPresent = !!await $.env.get('JEV_API_KEY'); } catch { /* Saved scopes stay off. */ }
+  for (const scope of saved.enabled) (keyPresent ? enabled : blocked).add(scope);
+  if (!keyPresent) safeLog($, `Jev: JEV_API_KEY is missing; saved ${saved.enabled.join(',')} stays off.`);
+}
+
+// Merges one field into the stored record so a command keeps what other sessions saved in the other field.
+async function saveRouting($, field, apply) {
+  try {
+    const saved = storedRouting(await $.store.get(STORE_KEY));
+    const next = storedRouting({ ...saved, [field]: apply(saved[field]) });
+    await $.store.set(STORE_KEY, next);
+    return next;
+  } catch {
+    safeLog($, 'Jev: routing state could not be saved; the change applies to this session only.');
+    return undefined;
+  }
+}
+
 export function register(on) {
   const enabled = new Set();
   const spawns = new Map();
@@ -199,12 +236,14 @@ export function register(on) {
   // Jev-selected effort by child agentId, applied to each of that child's model requests.
   const childEfforts = new Map();
   const pendingSpawns = new Set();
+  // Saved scopes left off at start because JEV_API_KEY was missing.
+  const blocked = new Set();
   let lastEvidence, sessionId, root;
   let serveBareCommand = false;
 
   function reset() {
     enabled.clear(); spawns.clear(); unavailable.clear(); agentCalls.clear(); childEfforts.clear();
-    pendingSpawns.clear(); lastEvidence = undefined; serveBareCommand = false;
+    pendingSpawns.clear(); blocked.clear(); lastEvidence = undefined; serveBareCommand = false;
     sessionId = undefined; root = undefined;
   }
 
@@ -214,7 +253,8 @@ export function register(on) {
 
   function context() {
     return `JEV_NATIVE_ROUTING ${flags()}. The main conversation uses the host model setting. `
-      + `Manually excluded models in this conversation: ${[...unavailable].sort().join(', ') || 'none'}. `
+      + `Manually excluded models: ${[...unavailable].sort().join(', ') || 'none'}. `
+      + 'Flags and exclusions persist across sessions until an explicit user command changes them. '
       + 'Exclude every model/effort option in those families from each prepared batch and recheck cached '
       + 'choices before dispatch. Quota for other models is unknown, so keep them eligible. '
       + 'Only explicit human exclude/include commands change this list; host errors never change it automatically. '
@@ -259,8 +299,9 @@ export function register(on) {
   }
 
   function status() {
-    return `Jev (current session): ${flags()}`
+    return `Jev: ${flags()}`
       + `; unavailable=${[...unavailable].sort().join(',') || 'none'}`
+      + (blocked.size ? `; saved ${[...blocked].join(',')} off until JEV_API_KEY is set` : '')
       + (lastEvidence ? `; last ${lastEvidence}` : '');
   }
 
@@ -268,9 +309,10 @@ export function register(on) {
     reset();
     root = $.plugin.root;
     try { sessionId = await $.session.id(); } catch { /* The helper falls back to CLAUDE_CODE_SESSION_ID. */ }
+    await restoreRouting($, enabled, unavailable, blocked);
     const existing = (await $.command.list()).find(command => command.name === 'jev');
     if (!existing) {
-      await $.command.register({ name: 'jev', description: 'Configure Jev routing for this session',
+      await $.command.register({ name: 'jev', description: 'Configure Jev routing; settings persist across sessions',
         argumentHint: '[status | on/off [skill subagent | all] | exclude/include <model...>]' });
       serveBareCommand = true;
     } else if ((existing.source === 'plugin' && existing.plugin === 'shuaigle')
@@ -291,23 +333,27 @@ export function register(on) {
     const control = parseControl(e.args);
     if (!control) return { text: USAGE, context: [context()] };
     if (control.action === 'exclude' || control.action === 'include') {
-      for (const model of control.models) {
-        const key = exclusionKey(model);
-        if (control.action === 'exclude') unavailable.add(key);
-        else unavailable.delete(key);
-      }
-      return { text: `${status()}; known aliases and full IDs in a family share its exclusion; inclusion does not verify restored quota.`,
+      const keys = control.models.map(exclusionKey);
+      const change = list => control.action === 'exclude' ? [...list, ...keys] : list.filter(key => !keys.includes(key));
+      const saved = await saveRouting($, 'unavailable', change);
+      const models = saved ? saved.unavailable : change([...unavailable]);
+      unavailable.clear();
+      for (const model of models) unavailable.add(model);
+      return { text: `${status()}${saved ? '' : '; not saved'}; known aliases and full IDs in a family share its exclusion; inclusion does not verify restored quota.`,
         context: [context()] };
     }
+    if (control.action === 'status') return { text: status(), context: [context()] };
     if (control.action === 'on') {
       let keyPresent = false;
       try { keyPresent = !!await $.env.get('JEV_API_KEY'); } catch { /* Keep flags unchanged. */ }
       if (!keyPresent) return { text: `JEV_API_KEY is missing; ${status()}`, context: [context()] };
       for (const scope of control.scopes) enabled.add(scope);
-    } else if (control.action === 'off') {
+    } else {
       for (const scope of control.scopes) enabled.delete(scope);
     }
-    return { text: status(), context: [context()] };
+    blocked.clear();
+    const saved = await saveRouting($, 'enabled', () => [...enabled]);
+    return { text: `${status()}${saved ? '' : '; not saved'}`, context: [context()] };
   });
 
   on('prompt.submit', ($, e, next) => next({ ...e, context: [...(e.context ?? []), context()] }));
@@ -336,7 +382,7 @@ export function register(on) {
     // tool_use_id is the host's pinned spawn identity, scoped to its parent loop.
     const key = spawnKey(e.parentAgentId, e.tool_use_id);
     const explicitEffort = key ? agentCalls.get(key)?.effort : undefined;
-    if (excluded(e.model, unavailable)) return { deny: `Jev: ${exclusionKey(e.model)} is unavailable in this conversation; dispatch blocked.` };
+    if (excluded(e.model, unavailable)) return { deny: `Jev: ${exclusionKey(e.model)} is manually excluded and unavailable; dispatch blocked.` };
     let state = key && spawns.get(key);
     let choice;
     // A spawn already routed natively before skill was enabled keeps that decision.
@@ -353,7 +399,7 @@ export function register(on) {
       }
       const { receipt } = claimed;
       if (excluded(e.model ?? receipt.model, unavailable)) {
-        return { deny: `Jev: ${exclusionKey(e.model ?? receipt.model)} is unavailable in this conversation; cached dispatch blocked.` };
+        return { deny: `Jev: ${exclusionKey(e.model ?? receipt.model)} is manually excluded and unavailable; cached dispatch blocked.` };
       }
       // A repeated event of a claimed spawn must still carry the receipt's model.
       if ((e.model ?? null) !== receipt.model) {
@@ -397,7 +443,7 @@ export function register(on) {
       choice = await state.choice;
     }
     const model = choice?.model ?? e.model;
-    if (excluded(model, unavailable)) return { deny: `Jev: ${exclusionKey(model)} is unavailable in this conversation; cached dispatch blocked.` };
+    if (excluded(model, unavailable)) return { deny: `Jev: ${exclusionKey(model)} is manually excluded and unavailable; cached dispatch blocked.` };
     const routed = choice && e.model === undefined;
     const effort = routed ? choice.effort : null;
     // Hold the child's early model requests until its agentId maps to the selected effort.

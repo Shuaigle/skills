@@ -6,7 +6,7 @@ Load this repo as a Claude Code plugin on version **2.1.287 or later**. The plug
 claude --plugin-dir .
 ```
 
-The user controls that session with `/jev on [skill subagent]`, `/jev on all`, `/jev off [decisions]`, and `/jev status`. Bare `/jev on` and `/jev on all` enable both decisions. Only explicit human commands change the enabled set; enabled decisions then run automatically in that conversation. Native commands own the flags and report them as context; use that state instead of a second skill-only state. The flags start off, stay in memory, and reset when the module reloads or the session ends. Plugin trust or organization policy may require approval to load the mod; successful routing does not ask for each child-model choice.
+The user controls that session with `/jev on [skill subagent]`, `/jev on all`, `/jev off [decisions]`, and `/jev status`. Bare `/jev on` and `/jev on all` enable both decisions. Only explicit human commands change the enabled set; enabled decisions then run automatically in that conversation. Native commands own the flags and report them as context; use that state instead of a second skill-only state. The flags start off. Each `on`/`off` saves the enabled set in the plugin store (`$.store`, a JSON file under the user's Claude Code configuration directory); every session start and module reload restores the last saved set, so the last command holds across sessions and restarts. A missing `JEV_API_KEY` at start leaves saved flags off without rewriting them, and status reports them. A running session reads the store only at start, so another session's later command reaches it at its next start or reload. If the store is unreadable or unwritable, the change applies to the current session and status reports `not saved`. Plugin trust or organization policy may require approval to load the mod; successful routing does not ask for each child-model choice.
 
 ## Manual model exclusions
 
@@ -16,7 +16,7 @@ Only human `/jev exclude <models...>` and `/jev include <models...>` commands ad
 
 Status and emitted context list the human exclusions. Agent-prepared combined batches remove every matching model/effort option. For new planned children, the native path filters options and checks prepared, native-selected, and cached choices immediately before dispatch. A blocked choice is reported; the mod never silently substitutes another model or automatically replays the spawn. Resume, fork, and host-owned workflow paths pass through unchanged; these checks do not guard their inherited models.
 
-Retain selected skills and the brief when human exclusions change. A newly planned attempt uses a new routing unit or revision and lets Jev select from updated candidates. Establish what possibly side-effecting failed work actually did before repeating it. Routing and dispatch checks stop whenever `subagent` is off, including skill-only mode; off retains the list. A new session, module reload, or session end clears it.
+Retain selected skills and the brief when human exclusions change. A newly planned attempt uses a new routing unit or revision and lets Jev select from updated candidates. Establish what possibly side-effecting failed work actually did before repeating it. Routing and dispatch checks stop whenever `subagent` is off, including skill-only mode; off retains the list. Exclusions persist in the plugin store with the flags; each `exclude`/`include` merges into the saved list, so exclusions saved by other sessions stay.
 
 ## What runs automatically
 

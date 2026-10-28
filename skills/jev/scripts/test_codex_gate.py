@@ -143,6 +143,7 @@ class GateTests(unittest.TestCase):
                  "fork_turns": "none", "model": "child-deep"}
         for scopes in (("skill",), ("subagent",), ("skill", "subagent")):
             with self.subTest(scopes=scopes):
+                self.send("UserPromptSubmit", prompt="jev off", turn_id="control")
                 self.send("SessionStart", source="startup")
                 self.enable(" ".join(scopes))
                 self.prompt()
@@ -401,9 +402,49 @@ class GateTests(unittest.TestCase):
         self.send("SessionStart", source="resume")
         self.assertEqual(self.read(), {})
         self.send("SessionStart", source="fork")
-        self.assertEqual(self.read(), {})
+        self.assertIn("declare", self.read()["hookSpecificOutput"]["permissionDecisionReason"],
+                      "a fork drops units and restores the saved flags")
+        self.send("UserPromptSubmit", prompt="jev off", turn_id="control")
+        self.send("SessionStart", source="fork")
         self.prompt()
         self.assertEqual(self.begin(unit(()))["status"], "disabled")
+
+    def status(self, session="session-a"):
+        result = self.send("UserPromptSubmit", session=session, prompt="jev status", turn_id="status")
+        return result["hookSpecificOutput"]["additionalContext"]
+
+    def test_last_control_persists_into_new_and_resumed_conversations(self):
+        self.enable("all")
+        self.send("SessionStart", session="session-b", source="startup")
+        self.assertIn('"enabled":["skill","subagent"]', self.status("session-b"))
+        self.send("UserPromptSubmit", session="session-b", prompt="jev off skill", turn_id="control")
+        self.send("SessionEnd")
+        self.send("SessionStart", source="resume")
+        self.assertIn('"enabled":["subagent"]', self.status())
+        saved = json.loads((gate.Path(self.tmp.name) / "flags.json").read_text())
+        self.assertEqual(saved, {"enabled": ["subagent"]}, "status never rewrites saved flags")
+
+    def test_saved_flags_need_a_key_and_unreadable_files_change_nothing(self):
+        self.enable("all")
+        with patch.dict(os.environ, {"JEV_API_KEY": ""}):
+            self.send("SessionStart", session="session-b", source="startup")
+        self.assertEqual(self.send("UserPromptSubmit", session="session-b", prompt="Read files",
+                                   turn_id="turn-b"), {}, "saved flags stay off without a key")
+        (gate.Path(self.tmp.name) / "flags.json").write_text("not json")
+        self.send("SessionStart", source="resume")
+        self.assertIn('"enabled":["skill","subagent"]', self.status())
+        self.send("SessionStart", session="session-c", source="startup")
+        self.assertIn('"enabled":[]', self.status("session-c"))
+
+    def test_hook_flags_use_plugin_data_while_session_state_stays_shared(self):
+        with patch.object(gate.tempfile, "gettempdir", return_value=self.tmp.name):
+            with patch.dict(os.environ, {"PLUGIN_DATA": self.tmp.name + "/plugin-only"}):
+                gate.handle_hook(hook("UserPromptSubmit", prompt="jev on skill", turn_id="control"))
+                gate.handle_hook(hook("SessionStart", session="session-b", source="startup"))
+        saved = gate.Path(self.tmp.name) / "plugin-only" / "flags.json"
+        self.assertEqual(json.loads(saved.read_text()), {"enabled": ["skill"]})
+        state = gate.Path(self.tmp.name) / ("jev-codex-" + str(os.getuid())) / (gate.digest("session-b") + ".json")
+        self.assertEqual(json.loads(state.read_text())["enabled"], ["skill"])
 
     def test_hook_only_plugin_data_does_not_split_the_state_store(self):
         with patch.object(gate.tempfile, "gettempdir", return_value=self.tmp.name):

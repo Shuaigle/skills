@@ -11,9 +11,9 @@
     {
       "name": "shuaigle",
       "source": "./",
-      "description": "14 個 agent skills：grill、prototype-logic、to-spec、to-tickets、implement、review、to-docs、retro、tdd、diagnosing-bugs、codebase-design、handoff、writing-great-skills、jev。設計從直接方案出發，新增機制須有當前需求或限制的依據，決策與 spec 聚焦已確認範圍。逐題決策、邏輯原型、三軸 review、session 回顧與使用者啟用的 Jev 零到多個 skills／subagent 模型與 effort 決策；每個獨立子任務只問一次並重用決策，Claude 原生整合支援使用者在本對話手動排除模型，並以收據核對 skill＋subagent 合併路由的派送，未知額度仍可路由。",
+      "description": "14 個 agent skills：grill、prototype-logic、to-spec、to-tickets、implement、review、to-docs、retro、tdd、diagnosing-bugs、codebase-design、handoff、writing-great-skills、jev。設計從直接方案出發，新增機制須有當前需求或限制的依據，決策與 spec 聚焦已確認範圍。逐題決策、邏輯原型、三軸 review、session 回顧與使用者啟用的 Jev 零到多個 skills／subagent 模型與 effort 決策；每個獨立子任務只問一次並重用決策，Claude 原生整合支援使用者手動排除模型，開關與排除清單跨 session 保存（Codex hooks 保存開關），並以收據核對 skill＋subagent 合併路由的派送，未知額度仍可路由。",
       "category": "engineering",
-      "keywords": ["skills", "grill", "interactive-questions", "logic-prototype", "code-review", "retrospective", "tdd", "spec", "tickets", "debugging", "adr", "skill-authoring", "jev", "user-invoked", "model-routing", "skill-routing", "multi-select", "subagent-routing", "claude-mods", "codex-hooks", "decision-cache", "effort-routing", "model-exclusions", "routing-receipts", "simple-design"]
+      "keywords": ["skills", "grill", "interactive-questions", "logic-prototype", "code-review", "retrospective", "tdd", "spec", "tickets", "debugging", "adr", "skill-authoring", "jev", "user-invoked", "model-routing", "skill-routing", "multi-select", "subagent-routing", "claude-mods", "codex-hooks", "decision-cache", "effort-routing", "model-exclusions", "routing-receipts", "persistent-flags", "simple-design"]
     }
   ]
 }

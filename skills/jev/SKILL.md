@@ -16,19 +16,19 @@ In Claude Code with this plugin's native mod loaded, read [Claude routing](refer
 
 ## Control
 
-Keep an `enabled_decisions` set, routing preferences, and work-unit choices in this conversation. Valid decisions are `skill` and `subagent`. A new conversation starts with both **off**. Codex hooks keep a private conversation cache; other paths keep runtime state in memory.
+Keep an `enabled_decisions` set, routing preferences, and work-unit choices in this conversation. Valid decisions are `skill` and `subagent`. Both start **off**. Claude native and Codex hooks save the last human `on`/`off` and restore it at each conversation start while `JEV_API_KEY` is set; Codex hooks keep work-unit choices in a private conversation cache; other paths keep runtime state in memory.
 
 | Request | Action | Done when |
 |---|---|---|
-| `jev on [decisions]` | Add the named decisions; bare `on` and `on all` enable both. Check `JEV_API_KEY` presence without displaying it; a missing key or unknown decision leaves the set unchanged. | Report both flags and conversation scope. Route accompanying work next. |
+| `jev on [decisions]` | Add the named decisions; bare `on` and `on all` enable both. Check `JEV_API_KEY` presence without displaying it; a missing key or unknown decision leaves the set unchanged. | Report both flags and whether they persist. Route accompanying work next. |
 | `jev off [decisions]` | Remove the named decisions; bare `off` or `off all` clears the set. Clear choices for disabled decisions. | Report both flags. Disabled decisions make no Jev requests. |
 | `jev status`, or `jev` alone | Report both flags, active work-unit choices, and any native model exclusions. | Make no API request. |
-| `jev exclude <models...>` — Claude native only | Exclude the named models in this conversation. Requires a human command; changes no routing flags and needs no API key. | Native status reports the exclusions. |
+| `jev exclude <models...>` — Claude native only | Exclude the named models; the list persists across sessions. Requires a human command; changes no routing flags and needs no API key. | Native status reports the exclusions. |
 | `jev include <models...>` — Claude native only | Remove those native exclusions. Changes no routing flags and does not verify restored credits. | Native status reports the remaining exclusions. |
 
 For example, `jev on subagent` enables child-model and effort routing from the default off state; `jev off skill` disables only optional skill selection. Effort belongs to `subagent`, not a separate enable scope. Configuration requests are not new work units.
 
-Claude native exclusions change only through human `exclude`/`include` commands. Runtime credit errors leave that list unchanged. While `subagent` is on, filtering and checks apply to new planned children; resume, fork, and workflow paths retain host behavior. Off retains the list, and a new session or module reload clears it. Other hosts follow human model constraints without gaining these native commands.
+Claude native exclusions change only through human `exclude`/`include` commands. Runtime credit errors leave that list unchanged. While `subagent` is on, filtering and checks apply to new planned children; resume, fork, and workflow paths retain host behavior. Off retains the list; it persists with the flags until `include` removes an entry. Other hosts follow human model constraints without gaining these native commands.
 
 Apply `skill` once per independent local work unit. Apply `subagent` and any enabled `skill` selection once per planned child's work. Ten file reads and their summary can be one unit; editing or verifying a different goal starts another. Reuse decisions for repeated reads, follow-ups, clarifications, and resuming the same unit. Changed goals, candidates, preferences, or enabled decisions need a new unit. Explicit user model, effort, or skill choices and mandatory workflows constrain their respective decisions. Other enabled decisions still apply.
 
