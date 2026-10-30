@@ -1,5 +1,5 @@
 interface:
   display_name: "Implement"
-  short_description: "Implement specs with tdd and acceptance checks"
+  short_description: "Implement and hand off project context for review/docs"
 policy:
   allow_implicit_invocation: false

@@ -1,12 +1,12 @@
 ---
 name: to-docs
-description: Distil finished work into the documentation that outlives it, and prune records that no longer point at live code. Writes into the repo's own vocabulary and decision records, CONTEXT.md and docs/adr/ by default.
+description: Distil finished implementation context into the target project's vocabulary and decision records, and prune outdated records. Use that project's documentation system; default to CONTEXT.md and docs/adr/.
 disable-model-invocation: true
 ---
 
 # To Docs
 
-Decide what from a finished piece of work deserves to outlive it, and shrink what is already there. Run this after the implementation is committed, or on its own when the docs have drifted from the code.
+Distil finished implementation context into the target project's own documentation, and shrink outdated records there. Run this after the implementation is committed, or on its own when that project's docs have drifted from its code.
 
 Three things outlive a feature: the vocabulary record (`CONTEXT.md` by default), the decision records (`docs/adr/` by default, one decision per file), and the tests. The tests look after themselves, since `tdd` writes them and the suite fails once they stop matching the code. This skill governs the other two. Local specs and tickets under `.scratch/` are disposable scaffolding. GitHub spec and ticket issues retain the work history. Long-term vocabulary and decision records stay in the repository.
 
@@ -16,9 +16,9 @@ The default formats belong to the `grill` skill: [CONTEXT-FORMAT](../grill/refer
 
 ## Find the documentation first
 
-Resolve the vocabulary and decision roles with [DOCUMENTATION-LOCATIONS.md](../grill/references/DOCUMENTATION-LOCATIONS.md). Where a role is filled, run its keep test against those files. Opening a home for an empty role is a change like any other: propose it and wait.
+Resolve the target project, then its vocabulary and decision roles, with [DOCUMENTATION-LOCATIONS.md](../grill/references/DOCUMENTATION-LOCATIONS.md). Use the implementation handoff when available. Where a role is filled, run its keep test against those files. Opening a home for an empty role is a change like any other: propose it and wait.
 
-Start by naming which files you took for each role and what format each uses, one line per role. Where you landed anywhere but the defaults, or where a role has no home at all, stop there and let the user confirm the reading before you prune. Read the wrong files and every proposal after it is wrong too.
+Start by naming the target repo and the files and format chosen for each role, one line per role. For cross-repo work, give each project its own mapping. Where you landed anywhere but the defaults, or where a role has no home at all, stop there and let the user confirm the reading before you prune. Read the wrong files and every proposal after it is wrong too.
 
 ## The keep tests
 
@@ -48,7 +48,11 @@ A wall of five proposals gets one hurried yes covering all five, which is not ap
 
 ## Process
 
-**Find the work first.** Read [ARTIFACT-STORAGE.md](../to-spec/references/ARTIFACT-STORAGE.md). Accept explicit spec/ticket issue URLs or numbers and local paths, follow their source and ticket links, and honor an existing source choice. Without one, discover matching generated spec/ticket issues in the confirmed GitHub repository, or the newest `.scratch/<feature-slug>/` carrying a marked `spec.md` for local storage. Also inspect commits landed since the last documentation commit. Read current bodies, resolve each ticket's `Source spec`, compare its exact body/file bytes with `Source SHA-256`, and check `Written against` commits against the implementation history. For older local generated tickets lacking both source fields, use an explicitly supplied or unambiguous adjacent `spec.md` and snapshot its current hash for this run; never invent a historical hash. Ambiguous sources, mismatched hashes, missing provenance on issue or new-format tickets, or an unresolved or unrelated commit stamp stop the distil run for reconciliation. Implementation changes since the stamped commit are evidence to compare with intent, not automatic drift failures. A required issue that cannot be read stops the run with an access report; never invent a local canonical replacement. Pick the way in from what turns up, and scope step 1 to it. Several candidates, ask which one. Nothing recent, say there is nothing to distil before you sweep anything.
+**Find the work first.** Use the user's completed-work context or implementation handoff and the target project's landed commits. A finished change can be distilled without a spec or tickets; base it on the conversation and committed implementation rather than inventing a plan.
+
+When planning artifacts exist, read their current bodies and follow [ARTIFACT-STORAGE.md](../to-spec/references/ARTIFACT-STORAGE.md) for source resolution, exact hashes and legacy local-ticket handling. Honor explicit URLs or paths; otherwise find matching generated issues in the target repo or its local `.scratch/<feature-slug>/`. Required sources that are ambiguous, inaccessible or inconsistent stop the distil run for reconciliation.
+
+Check recorded commits against each target project's implementation history. Changes since a planning stamp are evidence to compare with intent, not automatic drift failures. Done finding the work means each affected project has an identified change, committed implementation and any applicable source artifacts. Several unrelated candidates require a scope choice; nothing recent means there is nothing to distil.
 
 Two ways in, and they cover different ground. **Distilling a finished piece of work** runs all five steps, with step 1 narrowed to the records that work touched. **A standalone pruning run** sweeps every record in step 1 and stops there. Take the first when you found work, the second when the user asked for a sweep.
 
@@ -66,11 +70,11 @@ A contradiction you spot outside that scope is worth a line at the end of the ru
 
 ### 2. Distil
 
-Work from the marked spec body, whether an issue or local `spec.md`, its linked tickets, and the implementation commits. The spec records intent; the landed code records what survived contact with implementation. Two kinds of thing can come out, and each takes its own test.
+Work from the completed-work context and implementation commits, plus the current spec and tickets when present. The context records intent; the landed code records what survived contact with implementation. Keep only terms and decisions supported by that project's code. Two kinds of thing can come out, and each takes its own test.
 
 **Domain terms.** `grill docs` captures vocabulary the moment it lands, so most terms are written down long before you get here. What you are looking for is the term that surfaced during implementation and never made it back: a concept the code now names that the vocabulary record still misses. Apply the term test.
 
-**Decisions.** Read the spec's Implementation Decisions, compare them with the landed code, and apply the decision-record test.
+**Decisions.** Compare the spec's Implementation Decisions with the landed code when a spec exists. Otherwise use the completed-work context and committed implementation. Apply the decision-record test to what the code supports.
 
 **Most runs find none of either, and that is the expected result.** Say so and move on rather than inventing something to record.
 
@@ -94,7 +98,7 @@ Keeping documentation out of the implementation commit gives these records a his
 
 ### 5. Offer to take the scaffolding down
 
-A distil run only, and only after step 4 committed. Where commits were not authorized and you stopped at the diff, the spec still holds decisions that live nowhere else, so offer no cleanup. A standalone pruning run skips the step.
+A distil run with spec/ticket artifacts only, and only after step 4 committed. Where commits were not authorized and you stopped at the diff, offer no cleanup. A standalone pruning run or a change without planning artifacts skips the step.
 
 Once the documentation commit lands, check the work is finished by rereading all linked tickets and their blockers. Every acceptance criterion is ticked, or the user says so outright. Issue closure alone proves nothing. A criterion still `[ ]` means that check never passed: name the ticket and offer nothing. Tickets written before the tick-on-pass rule read as unfinished here.
 

@@ -6,6 +6,8 @@ disable-model-invocation: true
 
 Implement the work described by the user in the spec or tickets. Accept local paths and GitHub issue URLs or numbers; resolve issue numbers against the confirmed repository. Read [ARTIFACT-STORAGE.md](../to-spec/references/ARTIFACT-STORAGE.md) for source resolution, hashes, ownership, and safe writes. Honor explicit source choices. If a required issue cannot be read, stop and report; do not create a local replacement.
 
+Identify the target working tree and read its project instructions before changing code. For cross-repo work, track each affected repo separately. Use the [target-project rules](../grill/references/DOCUMENTATION-LOCATIONS.md#target-project) throughout the work and its handoff.
+
 When several tickets exist, work the **frontier**: read each referenced blocker and choose a ticket whose blockers have every acceptance box ticked. Issue closure alone does not prove acceptance passed. In a linear chain, work top to bottom.
 
 ## Rules
@@ -32,7 +34,15 @@ The next run reads those boxes to tell which blockers have landed, and `to-docs`
 
 Commit to the current branch only when the user or the repo's policy has authorized commits; otherwise stop after verification and report the diff.
 
-Then stop and point the user at the next two steps:
+Report a handoff for each affected project:
+
+- The target repo and working tree; keep private absolute paths out of public artifacts.
+- The spec/ticket URLs or local paths, when present.
+- The implementation commits, or an explicit statement that the work is uncommitted.
+- The checks that passed, remaining blockers, and decisions that may deserve project documentation.
+- Existing project documentation locations, when known; otherwise let `to-docs` discover them.
+
+Then stop and point the user at the next two user-invoked steps:
 
 1. `review`, run from a session that did not write this code, preferably on another model.
-2. `to-docs`, once the review's fixes land. The spec's decisions are the only part of this run that has nowhere to live; that skill decides what survives.
+2. `to-docs`, once the implementation and review fixes are committed. Pass the project handoff so it can distil the finished work into that project's terms and decision records.
