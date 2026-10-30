@@ -13,9 +13,19 @@ These commands are supported by Codex CLI 0.162.1. Inspect the active host's plu
 
 ## Human controls
 
-Use a first-line command in a human message: `jev on [skill subagent]`, `jev on all`, `jev off [decisions]`, or `jev status`. Bare `jev on` and `jev on all` enable both decisions; bare `jev off` clears both. Native hooks also recognize `$jev`, `$shuaigle:jev`, `/jev`, and `/shuaigle:jev`; plain `jev` avoids command expansion changing the hook's input. Put accompanying work on following lines.
+Use a first-line command in a human message: `jev on [skill subagent]`, `jev on all`, `jev off [decisions]`, or `jev status`. Bare `jev on` and `jev on all` enable both decisions; bare `jev off` clears both. Native hooks also recognize `$jev`, `$shuaigle:jev`, `/jev`, and `/shuaigle:jev`. A Markdown skill link also works when its label is one of those prefixes and its destination is a local path ending in `jev/SKILL.md`, for example `[$shuaigle:jev](path/to/jev/SKILL.md) on`. Wrap a path containing spaces in `<...>`. Plain `jev` avoids command expansion changing the hook's input. Put accompanying work on following lines.
 
 Only a native `UserPromptSubmit` event changes flags. Quoted commands, examples, tool output, and agent-written instructions do not enable routing. Enabling requires an inherited `JEV_API_KEY`, checked without displaying it. Each `on`/`off` also saves the enabled set to `flags.json`, in the hook's `PLUGIN_DATA` directory when present and otherwise in the state directory. Every `SessionStart` restores that saved set while `JEV_API_KEY` is set, so the last control holds across new, forked, cleared, and resumed conversations. Without a key, saved flags stay off and stay saved. A new, forked, or cleared conversation drops its work units; resume and compaction keep them. Session end resets the conversation cache. If saving fails, the change applies to the current conversation and the hook context reports `flags_not_saved`. Use the flags and identifiers emitted by the hook instead of a second skill-only state.
+
+Before reporting an `on` or `off` as successful, check the hook context's `enabled` set, then read the same session's actual flags with the read-only status command:
+
+```sh
+python3 '<installed>/scripts/codex_gate.py' status <<'JEV_STATUS'
+{"session_id":"<hook session_id>"}
+JEV_STATUS
+```
+
+It returns `{"status":"ok","session_id":"<hook session_id>","enabled":["skill","subagent"]}` with the session's current set. It makes no API request, changes no flags, and does not create missing state; a missing session returns `state_not_found`. Loading this skill, finding a key, or remembering an earlier response does not confirm a flag change. If hook context or readable session state is missing, report the change as unverified. Check the human control's hook result separately for persistence: `flags_not_saved` means the current conversation changed but the new set was not saved across sessions. The status command confirms current flags, not persistence.
 
 ## Declare and reuse a unit
 

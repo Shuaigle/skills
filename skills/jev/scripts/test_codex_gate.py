@@ -637,6 +637,46 @@ class GateTests(unittest.TestCase):
             self.send("UserPromptSubmit", prompt=prefix + " off", turn_id="control")
             self.assertEqual(self.read(), {})
 
+    def test_markdown_skill_link_enables_and_persists_flags(self):
+        result = self.send("UserPromptSubmit", turn_id="control", prompt=
+                           "[$shuaigle:jev](/opt/plugins/skills/jev/SKILL.md) on\nRead configuration")
+        self.assertIn('"enabled":["skill","subagent"]',
+                      result.get("hookSpecificOutput", {}).get("additionalContext", ""))
+        self.assertEqual(self.read()["hookSpecificOutput"]["permissionDecision"], "deny")
+        self.send("SessionStart", session="session-b", source="startup")
+        self.assertIn('"enabled":["skill","subagent"]', self.status("session-b"))
+        self.router.assert_not_called()
+
+    def test_markdown_controls_support_aliases_local_paths_and_independent_flags(self):
+        for prefix in ("jev", "$jev", "$shuaigle:jev", "/jev", "/shuaigle:jev"):
+            for target in ("skills/jev/SKILL.md", "</opt/Plugin Cache/skills/jev/SKILL.md>"):
+                with self.subTest(prefix=prefix, target=target):
+                    link = "[" + prefix + "](" + target + ")"
+                    self.send("UserPromptSubmit", prompt=link + " on all", turn_id="control")
+                    self.send("UserPromptSubmit", prompt=link + " off subagent", turn_id="control")
+                    result = self.send("UserPromptSubmit", prompt=link, turn_id="status")
+                    self.assertIn('"enabled":["skill"]', result["hookSpecificOutput"]["additionalContext"])
+                    self.send("UserPromptSubmit", prompt=link + " off", turn_id="control")
+                    self.assertIn('"enabled":[]', self.status())
+        self.router.assert_not_called()
+
+    def test_markdown_mentions_in_examples_or_other_links_cannot_enable(self):
+        link = "[$shuaigle:jev](/opt/plugins/skills/jev/SKILL.md)"
+        for prompt in ("Please run " + link + " on", "> " + link + " on",
+                       "`" + link + " on`", "```\n" + link + " on\n```",
+                       "Example:\n" + link + " on", " " + link + " on",
+                       "\\" + link + " on", "<skill>\n" + link + " on\n</skill>",
+                       "[$other:jev](/opt/skills/jev/SKILL.md) on",
+                       "[$shuaigle:jev](/opt/skills/other/SKILL.md) on",
+                       "[$shuaigle:jev](https://example.com/jev/SKILL.md) on",
+                       "[$shuaigle:jev](file:///opt/jev/SKILL.md) on",
+                       "[$shuaigle:jev](//example.com/jev/SKILL.md) on",
+                       link + " on imaginary"):
+            with self.subTest(prompt=prompt):
+                self.prompt(prompt)
+                self.assertIn('"enabled":[]', self.status())
+        self.router.assert_not_called()
+
     def test_hook_state_lock_busy_produces_denial_without_waiting_for_route(self):
         self.enable()
         self.prompt()
@@ -652,6 +692,59 @@ class GateTests(unittest.TestCase):
         return subprocess.run([sys.executable, str(gate.SCRIPT), *args], input=raw,
                               stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=env,
                               timeout=5)
+
+    def test_status_cli_reads_actual_flags_without_changing_the_session(self):
+        self.enable("all")
+        self.prompt()
+        self.begin()
+        before = {path.name: path.read_bytes() for path in gate.Path(self.tmp.name).iterdir()
+                  if path.is_file()}
+        result = self.cli(["status"], b'{"session_id":"session-a"}')
+        self.assertEqual(result.returncode, 0, result.stdout)
+        self.assertEqual(json.loads(result.stdout), {
+            "status": "ok", "session_id": "session-a", "enabled": ["skill", "subagent"]})
+        after = {path.name: path.read_bytes() for path in gate.Path(self.tmp.name).iterdir()
+                 if path.is_file()}
+        self.assertEqual(after, before, "status must preserve flags, turn and work receipts")
+        self.send("UserPromptSubmit", prompt="jev off skill", turn_id="control")
+        result = self.cli(["status"], b'{"session_id":"session-a"}')
+        self.assertEqual(json.loads(result.stdout)["enabled"], ["subagent"])
+        self.router.assert_called_once()
+
+    def test_status_cli_requires_existing_state_and_does_not_enable_routing(self):
+        result = self.cli(["status"], b'{"session_id":"missing"}')
+        self.assertEqual(result.returncode, 1)
+        self.assertEqual(json.loads(result.stdout), {"status": "error", "code": "state_not_found"})
+        self.assertFalse(list(gate.Path(self.tmp.name).glob("*.json")))
+        self.send("SessionStart", source="startup")
+        with patch.dict(os.environ, {"JEV_API_KEY": ""}):
+            result = self.cli(["status"], b'{"session_id":"session-a"}')
+        self.assertEqual(result.returncode, 0)
+        self.assertEqual(json.loads(result.stdout)["enabled"], [])
+        for raw in (b"{}", b'{"session_id":"session-a","enabled":["skill"]}',
+                    b'{"session_id":null}', b'{"session_id":"a","session_id":"b"}'):
+            result = self.cli(["status"], raw)
+            self.assertEqual(result.returncode, 1)
+            self.assertEqual(json.loads(result.stdout)["code"], "invalid_input")
+        self.assertIn('"enabled":[]', self.status())
+        self.router.assert_not_called()
+
+    def test_flag_verification_is_available_before_routing_work(self):
+        result = self.enable("all")
+        lines = result["hookSpecificOutput"]["additionalContext"].splitlines()
+        start = next(index for index, line in enumerate(lines) if line.startswith("python3 "))
+        end = lines.index("JEV_STATUS", start)
+        command = "\n".join(lines[start:end + 1])
+        self.assertEqual(self.send("PreToolUse", tool_name="exec_command", tool_input={"cmd": command}), {})
+        env = {**os.environ, "JEV_CODEX_STATE_DIR": self.tmp.name}
+        verified = subprocess.run(["bash", "-c", command], capture_output=True, env=env, timeout=5)
+        self.assertEqual(verified.returncode, 0, verified.stdout)
+        self.assertEqual(json.loads(verified.stdout)["enabled"], ["skill", "subagent"])
+        self.assertEqual(self.read()["hookSpecificOutput"]["permissionDecision"], "deny")
+        appended = command + "\npython3 arbitrary-work.py"
+        denied = self.send("PreToolUse", tool_name="exec_command", tool_input={"cmd": appended})
+        self.assertEqual(denied["hookSpecificOutput"]["permissionDecision"], "deny")
+        self.router.assert_not_called()
 
     def test_cli_help_bounded_json_duplicate_keys_and_redacted_errors(self):
         result = self.cli(["--help"], b"")

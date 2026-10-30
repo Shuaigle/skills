@@ -24,7 +24,10 @@ KINDS = {"read", "edit", "verify", "research", "work"}
 SCRIPT = Path(__file__).resolve()
 SKILL = SCRIPT.parent.parent
 UNIT_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,79}\Z")
-CONTROL_RE = re.compile(r"(?:jev|\$jev|\$shuaigle:jev|/jev|/shuaigle:jev)(?:[ \t]+(.*))?\Z")
+CONTROL_PREFIX = r"(?:jev|\$jev|\$shuaigle:jev|/jev|/shuaigle:jev)"
+CONTROL_RE = re.compile(CONTROL_PREFIX + r"(?:[ \t]+(.*))?\Z")
+LINK_CONTROL_RE = re.compile(
+    r"\[(" + CONTROL_PREFIX + r")\]\((<[^<>\r\n]+>|[^()\s]+)\)((?:[ \t]+.*)?)\Z")
 
 
 class GateError(Exception):
@@ -104,8 +107,10 @@ def file_lock(path, timeout):
 
 
 @contextlib.contextmanager
-def locked_state(session_id, state_dir=None):
+def locked_state(session_id, state_dir=None, *, read_only=False):
     require(identifier(session_id))
+    if read_only:
+        require(state_root(state_dir).is_dir(), "state_not_found")
     root = prepare_root(state_dir)
     stem = digest(session_id)
     with file_lock(root / (stem + ".lock"), 1):
@@ -127,8 +132,11 @@ def locked_state(session_id, state_dir=None):
                 state = blank_state()
                 state["enabled"] = enabled
         else:
+            require(not read_only, "state_not_found")
             state = blank_state()
         yield state
+        if read_only:
+            return
         raw = json.dumps(state, ensure_ascii=False, allow_nan=False,
                          separators=(",", ":")).encode()
         require(len(raw) <= MAX_STATE_BYTES, "state_full")
@@ -182,6 +190,16 @@ def deny(message):
 
 
 def control(first_line):
+    link = LINK_CONTROL_RE.fullmatch(first_line)
+    if link:
+        target = link.group(2)
+        if target.startswith("<"):
+            target = target[1:-1]
+        if (Path(target).parts[-2:] != ("jev", "SKILL.md")
+                or re.match(r"[A-Za-z][A-Za-z0-9+.-]*:|//", target)
+                or any(ord(char) < 32 for char in target)):
+            return None
+        first_line = link.group(1) + link.group(3)
     match = CONTROL_RE.fullmatch(first_line)
     if not match:
         return None
@@ -207,12 +225,18 @@ def turn_matches(value, state):
     return isinstance(value, str) and (value == state["turn"] or digest(value) == state["turn"])
 
 
-def bootstrap_context(event, state, warning=None):
+def bootstrap_context(event, state, warning=None, verify_control=False):
     receipt = {"session_id": event["session_id"], "turn_id": state["turn"],
                "enabled": state["enabled"]}
     message = "Jev routing " + json.dumps(receipt, separators=(",", ":"))
     if warning:
         message += ". " + warning
+    if verify_control:
+        message += (". Before reporting control success, read back this session's enabled flags:\n"
+                    + "python3 " + shlex.quote(str(SCRIPT)) + " status <<'JEV_STATUS'\n"
+                    + json.dumps({"session_id": event["session_id"]}, separators=(",", ":"))
+                    + "\nJEV_STATUS\nCompare enabled with the requested change. "
+                    + "Skill loading and API key presence do not confirm activation.")
     if state["pending"] and state["enabled"]:
         message += (". Before each independent work unit, call python3 "
                     + shlex.quote(str(SCRIPT))
@@ -266,7 +290,7 @@ def handle_hook(event, state_dir=None):
                         save_flags(state["enabled"], state_dir)
                     except (OSError, GateError):
                         warning = "flags_not_saved; the change applies to this conversation only."
-                return bootstrap_context(event, state, warning)
+                return bootstrap_context(event, state, warning, verify_control=action in {"on", "off"})
             return bootstrap_context(event, state) if state["enabled"] else {}
         if not state["enabled"]:
             return {}
@@ -279,6 +303,12 @@ def handle_hook(event, state_dir=None):
                         "Jev is enabled: declare and route the pending work with codex_gate.py begin before finishing."}
             return {}
         return pre_tool(event, state)
+
+
+def read_status(data, state_dir=None):
+    require(isinstance(data, dict) and set(data) == {"session_id"})
+    with locked_state(data["session_id"], state_dir, read_only=True) as state:
+        return {"status": "ok", "session_id": data["session_id"], "enabled": state["enabled"]}
 
 
 def validate_begin(data):
@@ -423,16 +453,16 @@ def shell_command(arguments):
     return arguments.get("command", arguments.get("cmd", ""))
 
 
-def is_bootstrap(command):
+def is_bootstrap(command, action="begin", marker="JEV_UNIT"):
     if not isinstance(command, str) or len(command.encode()) > MAX_BYTES:
         return False
     lines = command.splitlines()
-    if (len(lines) < 3 or lines[-1] != "JEV_UNIT"
-            or not lines[0].endswith(" <<'JEV_UNIT'")):
+    if (len(lines) < 3 or lines[-1] != marker
+            or not lines[0].endswith(" <<'" + marker + "'")):
         return False
     try:
         words = shlex.split(lines[0])
-        if words != ["python3", str(SCRIPT), "begin", "<<JEV_UNIT"]:
+        if words != ["python3", str(SCRIPT), action, "<<" + marker]:
             return False
         json.loads("\n".join(lines[1:-1]), object_pairs_hook=unique_object)
     except (ValueError, GateError):
@@ -455,6 +485,8 @@ def is_metadata_read(name, arguments):
     if name in {"read", "read_file"}:
         return metadata_path(arguments.get("file_path", arguments.get("path")))
     if name in {"bash", "exec_command"}:
+        if is_bootstrap(shell_command(arguments), "status", "JEV_STATUS"):
+            return True
         try:
             words = shlex.split(shell_command(arguments))
         except (ValueError, TypeError):
@@ -529,13 +561,22 @@ def pre_tool(event, state):
     return {}
 
 
-HELP = """usage: codex_gate.py hook|begin < JSON
+HELP = """usage: codex_gate.py hook|begin|status < JSON
 
 hook accepts trusted Codex SessionStart, SessionEnd, UserPromptSubmit,
 PreToolUse and Stop events. Only an anchored first-line human jev control in
 UserPromptSubmit changes skill/subagent flags. The last on/off control is saved
 and restored at every conversation start while JEV_API_KEY is set.
 Bare jev on and jev on all enable both. The retired task control is invalid.
+Markdown links with a supported control label and a local jev/SKILL.md target
+use the same first-line controls.
+
+status fields:
+  session_id: echo the hook's session_id. Reads actual enabled flags without
+              changing the turn, flags or receipts and makes no API request.
+              Missing session state returns state_not_found, never assumed OFF.
+Before reporting control success, compare these flags with the requested change.
+Current flags alone do not confirm that the last control was saved across sessions.
 
 begin fields:
   session_id, turn_id: echo the host context; turn_id may be its emitted token.
@@ -591,11 +632,16 @@ def main(argv=None):
         if args == ["--help"]:
             print(HELP)
             return 0
-        require(args in (["hook"], ["begin"]), "invalid_arguments")
+        require(args in (["hook"], ["begin"], ["status"]), "invalid_arguments")
         raw = sys.stdin.buffer.read(MAX_BYTES + 1)
         require(len(raw) <= MAX_BYTES)
         data = json.loads(raw, object_pairs_hook=unique_object)
-        result = handle_hook(data) if args == ["hook"] else begin_unit(data)
+        if args == ["hook"]:
+            result = handle_hook(data)
+        elif args == ["status"]:
+            result = read_status(data)
+        else:
+            result = begin_unit(data)
     except (GateError, route.RoutingError) as error:
         result = {"status": "error", "code": error.code}
     except (ValueError, UnicodeError):
