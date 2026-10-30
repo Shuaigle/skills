@@ -1,6 +1,6 @@
 # Skills
 
-14 個 agent skills。取自 [mattpocock/skills](https://github.com/mattpocock/skills)，融入 [shadcn/improve](https://github.com/shadcn/improve) 的計畫紀律：grill 系列四合一，spec/ticket 落地為本地檔案（`.scratch/`），要求自足、可跑的驗證準則、STOP 條件與 drift check（先確認計畫仍符合程式碼）。
+14 個 agent skills。取自 [mattpocock/skills](https://github.com/mattpocock/skills)，融入 [shadcn/improve](https://github.com/shadcn/improve) 的計畫紀律：grill 系列四合一，repo 有 GitHub 遠端時把 spec/ticket 寫成 issues，否則寫入 `.scratch/`；要求自足、可跑的驗證準則、STOP 條件與 drift check（先確認計畫仍符合程式碼）。
 
 每個 skill 附 `SKILL.md`（Agent Skills 標準）與 `agents/openai.yaml`（Codex metadata），Claude Code 與 Codex 裝完即用。
 
@@ -39,7 +39,7 @@ cd skills && ./scripts/link-skills.sh
 
 呼叫語法：plugin 裝法要帶 namespace（`/shuaigle:grill`）；skills.sh 或 symlink 裝法用裸名（`/grill`）；Codex 用 `$grill`，或由 description 自動觸發。
 
-依賴說明：`diagnosing-bugs` 的架構交棒會用環境裡既有的 audit skill（如 `improve`），沒有就以文字報告代替。`review` 預設開 fresh-context subagent 審，harness 不支援時自己審，並在報告開頭的來源行註明。spec 與 tickets 都是本地檔案。`jev` 需要 Python 3、網路與環境變數 `JEV_API_KEY`，呼叫 TypeSafe API。Claude Code 原生 subagent 模型路由需要 `2.1.287+`，effort 路由在 `2.1.302` 驗證過，並以 plugin 方式載入本 repo 的 mod；symlink／skills.sh 只安裝 skill，不會載入 mod。開發時可用 `claude --plugin-dir .`。
+依賴說明：`diagnosing-bugs` 的架構交棒會用環境裡既有的 audit skill（如 `improve`），沒有就以文字報告代替。`review` 預設開 fresh-context subagent 審，harness 不支援時自己審，並在報告開頭的來源行註明。spec/tickets 的 GitHub 路線使用可用的 GitHub connector 或已登入的 `gh`；已確認 GitHub 卻缺權限時會報錯，不會悄悄改用本地。`jev` 需要 Python 3、網路與環境變數 `JEV_API_KEY`，呼叫 TypeSafe API。Claude Code 原生 subagent 模型路由需要 `2.1.287+`，effort 路由在 `2.1.302` 驗證過，並以 plugin 方式載入本 repo 的 mod；symlink／skills.sh 只安裝 skill，不會載入 mod。開發時可用 `claude --plugin-dir .`。
 
 ## Skills
 
@@ -47,8 +47,8 @@ cd skills && ./scripts/link-skills.sh
 |---|---|---|
 | [grill](./skills/grill/SKILL.md) | model | 聚焦本次交付、正確性與已知限制的必要決策，優先用選項 UI 一次問一題；`grill docs` 同時維護詞彙與決策記錄（預設 CONTEXT.md 與 docs/adr/） |
 | [prototype-logic](./skills/prototype-logic/SKILL.md) | model | 用可操作的單檔 HTML 驗證一個邏輯或狀態模型問題，支援自由操作、重設與情境演練 |
-| [to-spec](./skills/to-spec/SKILL.md) | user | 把已確認需求收斂成自足、可驗收的 spec，寫入 `.scratch/<feature>/spec.md` |
-| [to-tickets](./skills/to-tickets/SKILL.md) | user | 把 spec 純轉譯成 tracer-bullet tickets（可工作的縱切）：自足、可跑的驗證準則、STOP 條件、blocking 關係；前置重構須有具體阻擋證據 |
+| [to-spec](./skills/to-spec/SKILL.md) | user | 把已確認需求收斂成自足、可驗收的 spec；有 GitHub 遠端就寫成 issue，否則寫入 `.scratch/<feature>/spec.md` |
+| [to-tickets](./skills/to-tickets/SKILL.md) | user | 把 spec 純轉譯成 tracer-bullet tickets（可工作的縱切）；有 GitHub 遠端就一票一個 issue，否則一票一個本地檔案；保留來源 hash、驗收指令、STOP 條件與 blocking 關係 |
 | [implement](./skills/implement/SKILL.md) | user | 照 spec/tickets 實作：drift check、`tdd`、跑指令驗收、授權後 commit；不自審，收尾指向 `review` |
 | [review](./skills/review/SKILL.md) | user | 在沒寫過這段 code 的 session 三軸審 diff（含未 commit 與 untracked）：Spec、Correctness、Standards 分開報告；作者的設計文件只當待驗證的說法；逐條開檔驗證，外部 review 意見也走同一套 |
 | [to-docs](./skills/to-docs/SKILL.md) | user | 實作 commit 後沉澱：詞彙與夠格的決策寫進 repo 既有文檔，逐項提議處理脫鉤記錄，文檔獨立 commit |
@@ -80,7 +80,7 @@ Claude 內建 Agent 工具在 `2.1.292+` 支援非 fork 的逐次 effort。兩�
 
 討論中需要可執行證據時，用 `prototype-logic` 驗證一個問題，再回到 grill 或 spec。原型是暫存施工架，模擬通過不代表 production 已驗證。工作中反覆卡住或出錯後，可用 `retro` 回顧環境；它只提建議，不直接套用。
 
-`.scratch/` 的 spec 與 ticket 是施工架，用完即丟；長期留下的是詞彙記錄、決策記錄與測試。前兩者預設落在 `CONTEXT.md` 與 `docs/adr/`，repo 已有自己的文檔系統就寫進既有位置，不另開一套。測試由 `tdd` 產出、測試套件把關；`to-docs` 只管前兩者，逐項提議哪些留、哪些改、哪些刪，也可以單獨叫起來修剪已經跟程式碼脫鉤的舊記錄。
+Spec 與 ticket 是施工規格：GitHub issues 保留工作歷程，本地 `.scratch/` 可在完工後清理；兩者都不取代詞彙記錄、決策記錄與測試。前兩者預設落在 `CONTEXT.md` 與 `docs/adr/`，repo 已有自己的文檔系統就寫進既有位置，不另開一套。測試由 `tdd` 產出、測試套件把關；`to-docs` 只管前兩者，逐項提議哪些留、哪些改、哪些刪，也可以單獨叫起來修剪已經跟程式碼脫鉤的舊記錄。Issue 的關閉與本地目錄刪除都需另行取得授權。
 
 ## 出處與授權
 

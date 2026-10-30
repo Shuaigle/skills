@@ -32,7 +32,7 @@ A ref that fails to resolve, or a diff and untracked list that are both empty, e
 
 ## 2. Gather the sources
 
-**Spec:** the spec and tickets the user passed; otherwise the `.scratch/<feature-slug>/` that matches the branch or the change; otherwise ask. With no spec, the Spec axis reports only "no spec available".
+**Spec:** accept the spec and tickets the user passed as local paths or GitHub issue URLs/numbers. Resolve sources with [ARTIFACT-STORAGE.md](../to-spec/references/ARTIFACT-STORAGE.md): follow explicit and linked sources first; otherwise discover matching generated issues in the confirmed GitHub repository, or `.scratch/<feature-slug>/` for local storage. Several candidates, ask which one. Read current bodies and linked blockers; check recorded source hashes and commit drift before treating tickets as current requirements. Older local generated tickets lacking both source fields may use an explicitly supplied or unambiguous adjacent `spec.md`; snapshot its current hash for this run without inventing a historical hash. Ambiguous sources still stop, and issue or new-format tickets require recorded provenance. A closed issue or ticked box is an author claim, not proof that acceptance passed. Unreadable required issues stop the run with an access report; do not replace them with local files or report them as absent. With no spec, the Spec axis reports only "no spec available".
 
 **Author's claims:** design notes, implementation reports, commit messages, and ticked acceptance boxes. They state what the author believes the code does. They go in the brief labeled as claims, never as spec.
 
@@ -47,7 +47,7 @@ Dispatch one fresh-context reviewer subagent with the brief below. Split into on
 The reviewer has seen none of this conversation, so the brief carries everything:
 
 - The diff commands, commit list, and untracked files from step 1.
-- The spec and ticket paths, the author's claims, the standards files, and the risks from step 2.
+- The spec and ticket paths or issue URLs, their current bodies and source hashes, the author's claims, the standards files, and the risks from step 2.
 - The **Axes** section below, pasted in full.
 - These rules, verbatim:
 
@@ -100,7 +100,7 @@ For a high-risk change, run one more review scoped to the fixes: its brief names
 
 ### Spec
 
-Cite the spec or ticket line behind every finding.
+Cite the spec or ticket line behind every finding. For issue sources, include the issue URL and quote the requirement from the body read for this review.
 
 - Requirements missing or partly done.
 - Requirements implemented wrongly.

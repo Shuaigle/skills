@@ -1,5 +1,5 @@
 interface:
   display_name: "To Spec"
-  short_description: "Turn a conversation into a spec"
+  short_description: "Turn agreed requirements into an issue or local spec"
 policy:
   allow_implicit_invocation: false

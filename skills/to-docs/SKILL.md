@@ -8,9 +8,9 @@ disable-model-invocation: true
 
 Decide what from a finished piece of work deserves to outlive it, and shrink what is already there. Run this after the implementation is committed, or on its own when the docs have drifted from the code.
 
-Three things outlive a feature: the vocabulary record (`CONTEXT.md` by default), the decision records (`docs/adr/` by default, one decision per file), and the tests. The tests look after themselves, since `tdd` writes them and the suite fails once they stop matching the code. This skill governs the other two. Specs and tickets under `.scratch/` are scaffolding and stay disposable.
+Three things outlive a feature: the vocabulary record (`CONTEXT.md` by default), the decision records (`docs/adr/` by default, one decision per file), and the tests. The tests look after themselves, since `tdd` writes them and the suite fails once they stop matching the code. This skill governs the other two. Local specs and tickets under `.scratch/` are disposable scaffolding. GitHub spec and ticket issues retain the work history. Long-term vocabulary and decision records stay in the repository.
 
-In user messages, translate the internal labels into plain language: vocabulary record means the project terms file; decision record means a design-decision document; prune means remove outdated documentation; distil means save useful terms and decisions; fold means add a decision to an existing record; supersede means write its replacement; scaffolding means temporary spec and ticket files.
+In user messages, translate the internal labels into plain language: vocabulary record means the project terms file; decision record means a design-decision document; prune means remove outdated documentation; distil means save useful terms and decisions; fold means add a decision to an existing record; supersede means write its replacement; scaffolding means temporary specs and tickets.
 
 The default formats belong to the `grill` skill: [CONTEXT-FORMAT](../grill/references/CONTEXT-FORMAT.md) and [ADR-FORMAT](../grill/references/ADR-FORMAT.md). A repo with its own documentation system keeps its own formats. Match what is there instead of reshaping it.
 
@@ -48,7 +48,7 @@ A wall of five proposals gets one hurried yes covering all five, which is not ap
 
 ## Process
 
-**Find the work first.** Look for the newest `.scratch/<feature-slug>/` carrying a marked `spec.md`, and the commits landed since the last documentation commit. Pick the way in from what turns up, and scope step 1 to it. Several candidates, ask which one. Nothing recent, say there is nothing to distil before you sweep anything.
+**Find the work first.** Read [ARTIFACT-STORAGE.md](../to-spec/references/ARTIFACT-STORAGE.md). Accept explicit spec/ticket issue URLs or numbers and local paths, follow their source and ticket links, and honor an existing source choice. Without one, discover matching generated spec/ticket issues in the confirmed GitHub repository, or the newest `.scratch/<feature-slug>/` carrying a marked `spec.md` for local storage. Also inspect commits landed since the last documentation commit. Read current bodies, resolve each ticket's `Source spec`, compare its exact body/file bytes with `Source SHA-256`, and check `Written against` commits against the implementation history. For older local generated tickets lacking both source fields, use an explicitly supplied or unambiguous adjacent `spec.md` and snapshot its current hash for this run; never invent a historical hash. Ambiguous sources, mismatched hashes, missing provenance on issue or new-format tickets, or an unresolved or unrelated commit stamp stop the distil run for reconciliation. Implementation changes since the stamped commit are evidence to compare with intent, not automatic drift failures. A required issue that cannot be read stops the run with an access report; never invent a local canonical replacement. Pick the way in from what turns up, and scope step 1 to it. Several candidates, ask which one. Nothing recent, say there is nothing to distil before you sweep anything.
 
 Two ways in, and they cover different ground. **Distilling a finished piece of work** runs all five steps, with step 1 narrowed to the records that work touched. **A standalone pruning run** sweeps every record in step 1 and stops there. Take the first when you found work, the second when the user asked for a sweep.
 
@@ -66,7 +66,7 @@ A contradiction you spot outside that scope is worth a line at the end of the ru
 
 ### 2. Distil
 
-Work from the marked `spec.md` and the implementation commits. The spec records intent; the landed code records what survived contact with implementation. Two kinds of thing can come out, and each takes its own test.
+Work from the marked spec body, whether an issue or local `spec.md`, its linked tickets, and the implementation commits. The spec records intent; the landed code records what survived contact with implementation. Two kinds of thing can come out, and each takes its own test.
 
 **Domain terms.** `grill docs` captures vocabulary the moment it lands, so most terms are written down long before you get here. What you are looking for is the term that surfaced during implementation and never made it back: a concept the code now names that the vocabulary record still misses. Apply the term test.
 
@@ -94,15 +94,13 @@ Keeping documentation out of the implementation commit gives these records a his
 
 ### 5. Offer to take the scaffolding down
 
-A distil run only, and only after step 4 committed. Where commits were not authorized and you stopped at the diff, the spec still holds decisions that live nowhere else, so say nothing about deleting it. A standalone pruning run has no feature directory in view and skips the step.
+A distil run only, and only after step 4 committed. Where commits were not authorized and you stopped at the diff, the spec still holds decisions that live nowhere else, so offer no cleanup. A standalone pruning run skips the step.
 
-Once the documentation commit lands, the spec and its tickets have done their job, and the next reader who opens them takes a finished plan for the current one. The whole `.scratch/<feature-slug>/` is one disposable unit, so what it holds does not need auditing. What matters is deleting the right directory, and only once the work in it is done.
+Once the documentation commit lands, check the work is finished by rereading all linked tickets and their blockers. Every acceptance criterion is ticked, or the user says so outright. Issue closure alone proves nothing. A criterion still `[ ]` means that check never passed: name the ticket and offer nothing. Tickets written before the tick-on-pass rule read as unfinished here.
 
-Check the target is exactly one `.scratch/<feature-slug>/`, the slug a single path segment. Never `.scratch/` itself, never a path climbing out of it.
+For GitHub scaffolding, offer to close the exact generated spec and ticket issues by URL, with keeping them open as the default. Closing is a separate operation requiring approval for those issues; never close them automatically, delete issues, or rewrite their bodies. Reread their current bodies before an approved close; changed acceptance or links require rechecking completion. Already closed issues need no action.
 
-Then check the work is finished. Every acceptance criterion across the tickets is ticked, or the user says so outright. A criterion still `[ ]` means that check never passed: name the ticket and offer nothing. Tickets written before the tick-on-pass rule read as unfinished here, and the user clears those directories by hand.
-
-Then one offer: the path spelled out, that deleting cannot be undone, and keep or delete with keeping as the default. One confirmation covers one directory. Other directories under `.scratch/` are out of scope however stale they look; sweeping them is a request the user has not made.
+For local scaffolding, check the target is exactly one `.scratch/<feature-slug>/`, the slug a single path segment. Never `.scratch/` itself, never a path climbing out of it. Then offer the path spelled out, that deleting cannot be undone, and keep or delete with keeping as the default. One confirmation covers one directory. Other directories are out of scope. For mixed sources, keep the issue close operation and local directory removal separate; approval for one does not cover the other.
 
 ## STOP if
 

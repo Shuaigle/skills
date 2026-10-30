@@ -1,7 +1,7 @@
 {
   "name": "shuaigle",
-  "version": "0.14.1",
-  "description": "14 個 agent skills：grill、prototype-logic、to-spec、to-tickets、implement、review、to-docs、retro、tdd、diagnosing-bugs、codebase-design、handoff、writing-great-skills、jev。設計從直接方案出發，新增機制須有當前需求或限制的依據，決策與 spec 聚焦已確認範圍。逐題決策、邏輯原型、三軸 review、session 回顧與使用者啟用的 Jev skills／subagent 模型及 effort 決策；每個獨立子任務只問一次並重用。Claude 原生整合支援手動排除模型；Codex 支援 Markdown 技能命令並讀回實際旗標。開關跨 session 保存（Claude 含排除清單），合併路由以收據核對派送，未知額度仍可路由。",
+  "version": "0.15.0",
+  "description": "14 個 agent skills：grill、prototype-logic、to-spec、to-tickets、implement、review、to-docs、retro、tdd、diagnosing-bugs、codebase-design、handoff、writing-great-skills、jev。設計從直接方案出發，新增機制須有當前需求或限制的依據，決策與 spec 聚焦已確認範圍。逐題決策、邏輯原型、GitHub issue 規格與票券（無 GitHub 遠端則本地）、三軸 review、session 回顧與使用者啟用的 Jev skills／subagent 模型及 effort 決策；每個獨立子任務只問一次並重用。Claude 原生整合支援手動排除模型；Codex 支援 Markdown 技能命令並讀回實際旗標。開關跨 session 保存（Claude 含排除清單），合併路由以收據核對派送，未知額度仍可路由。",
   "author": {
     "name": "Shuaigle",
     "url": "https://github.com/Shuaigle"
@@ -9,7 +9,7 @@
   "homepage": "https://github.com/Shuaigle/skills",
   "repository": "https://github.com/Shuaigle/skills",
   "license": "MIT",
-  "keywords": ["skills", "grill", "interactive-questions", "logic-prototype", "code-review", "retrospective", "tdd", "spec", "tickets", "debugging", "adr", "skill-authoring", "jev", "user-invoked", "model-routing", "skill-routing", "multi-select", "subagent-routing", "claude-mods", "codex-hooks", "decision-cache", "effort-routing", "model-exclusions", "routing-receipts", "persistent-flags", "markdown-controls", "flag-verification", "simple-design"],
+  "keywords": ["skills", "grill", "interactive-questions", "logic-prototype", "code-review", "retrospective", "tdd", "spec", "tickets", "debugging", "adr", "skill-authoring", "jev", "user-invoked", "model-routing", "skill-routing", "multi-select", "subagent-routing", "claude-mods", "codex-hooks", "decision-cache", "effort-routing", "model-exclusions", "routing-receipts", "persistent-flags", "markdown-controls", "flag-verification", "simple-design", "github-issues", "spec-issues", "issue-tickets"],
   "skills": [
     "./skills/grill",
     "./skills/prototype-logic",
