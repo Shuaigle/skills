@@ -1,0 +1,3 @@
+interface:
+  display_name: "Browser QA"
+  short_description: "Verify local browser flows with runtime evidence"
