@@ -1,6 +1,6 @@
 # Skills
 
-14 個 agent skills。取自 [mattpocock/skills](https://github.com/mattpocock/skills)，融入 [shadcn/improve](https://github.com/shadcn/improve) 的計畫紀律：grill 系列四合一，repo 有 GitHub 遠端時把 spec/ticket 寫成 issues，否則寫入 `.scratch/`；要求自足、可跑的驗證準則、STOP 條件與 drift check（先確認計畫仍符合程式碼）。
+15 個 agent skills。取自 [mattpocock/skills](https://github.com/mattpocock/skills)，融入 [shadcn/improve](https://github.com/shadcn/improve) 的計畫紀律：grill 系列四合一，repo 有 GitHub 遠端時把 spec/ticket 寫成 issues，否則寫入 `.scratch/`；要求自足、可跑的驗證準則、STOP 條件與 drift check（先確認計畫仍符合程式碼）。
 
 每個 skill 附 `SKILL.md`（Agent Skills 標準）與 `agents/openai.yaml`（Codex metadata），Claude Code 與 Codex 裝完即用。
 
@@ -47,6 +47,7 @@ cd skills && ./scripts/link-skills.sh
 |---|---|---|
 | [grill](./skills/grill/SKILL.md) | model | 聚焦本次交付、正確性與已知限制的必要決策，優先用選項 UI 一次問一題；`grill docs` 同時維護詞彙與決策記錄（預設 CONTEXT.md 與 docs/adr/） |
 | [prototype-logic](./skills/prototype-logic/SKILL.md) | model | 用可操作的單檔 HTML 驗證一個邏輯或狀態模型問題，支援自由操作、重設與情境演練 |
+| [browser-qa](./skills/browser-qa/SKILL.md) | model | 在隔離瀏覽器驗收本機真實流程，記錄預期、實際結果與最小執行證據 |
 | [to-spec](./skills/to-spec/SKILL.md) | user | 把已確認需求收斂成自足、可驗收的 spec；有 GitHub 遠端就寫成 issue，否則寫入 `.scratch/<feature>/spec.md` |
 | [to-tickets](./skills/to-tickets/SKILL.md) | user | 把 spec 純轉譯成 tracer-bullet tickets（可工作的縱切）；有 GitHub 遠端就一票一個 issue，否則一票一個本地檔案；保留來源 hash、驗收指令、STOP 條件與 blocking 關係 |
 | [implement](./skills/implement/SKILL.md) | user | 照 spec/tickets 實作：drift check、`tdd`、跑指令驗收、授權後 commit；交接目標 repo、來源、實作 commit 與驗證結果，供獨立 `review` 及 `to-docs` 接續 |
@@ -81,6 +82,11 @@ Claude 內建 Agent 工具在 `2.1.292+` 支援非 fork 的逐次 effort。兩�
 討論中需要可執行證據時，用 `prototype-logic` 驗證一個問題，再回到 grill 或 spec。原型是暫存施工架，模擬通過不代表 production 已驗證。工作中反覆卡住或出錯後，可用 `retro` 回顧環境；它只提建議，不直接套用。
 
 Spec 與 ticket 是施工規格：GitHub issues 保留工作歷程，本地 `.scratch/` 可在完工後清理；兩者都不取代詞彙記錄、決策記錄與測試。前兩者預設落在 `CONTEXT.md` 與 `docs/adr/`，repo 已有自己的文檔系統就寫進既有位置，不另開一套。測試由 `tdd` 產出、測試套件把關；`to-docs` 只管前兩者，逐項提議哪些留、哪些改、哪些刪，也可以單獨叫起來修剪已經跟程式碼脫鉤的舊記錄。Issue 的關閉與本地目錄刪除都需另行取得授權。
+
+## 選用的本機工具
+
+- 已安裝 [Plannotator](https://github.com/backnotprop/plannotator) 時，可以手動註解 plan 或 diff，把意見帶回 `grill` 或 `review`。註解不等於驗收，仍須核對規格、程式碼或實際結果。不開啟分享或自動 hook。
+- `browser-qa` 優先使用專案既有的瀏覽器測試。只有需要互動證據或短影片時，才使用已配置的 Chrome DevTools MCP 或既有的 FFmpeg；操作見[選用工具說明](./skills/browser-qa/references/runtime-tools.md)。本 repo 不安裝或綁定這些工具。
 
 ## 出處與授權
 
