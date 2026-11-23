@@ -85,7 +85,7 @@ Spec 與 ticket 是施工規格：GitHub issues 保留工作歷程，本地 `.sc
 
 ## 選用的本機工具
 
-- 已安裝 [Plannotator](https://github.com/backnotprop/plannotator) 時，可以手動註解 plan 或 diff，把意見帶回 `grill` 或 `review`。註解不等於驗收，仍須核對規格、程式碼或實際結果。不開啟分享或自動 hook。
+- 已安裝 [Plannotator](https://github.com/backnotprop/plannotator) 時，可以手動註解 plan 或 diff，再把要採用的註解貼回 agent 對話：plan 意見是 `grill` 的待確認決策，diff 意見是 `review` 的待核對外部回饋。註解不等於驗收。不開啟分享或自動 hook。
 - `browser-qa` 優先使用專案既有的瀏覽器測試。只有需要互動證據或短影片時，才使用已配置的 Chrome DevTools MCP 或既有的 FFmpeg；操作見[選用工具說明](./skills/browser-qa/references/runtime-tools.md)。本 repo 不安裝或綁定這些工具。
 
 ## 出處與授權
