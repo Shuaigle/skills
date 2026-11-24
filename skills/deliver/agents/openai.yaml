@@ -1,0 +1,5 @@
+interface:
+  display_name: "Deliver"
+  short_description: "Run a feature from grill through review to docs"
+policy:
+  allow_implicit_invocation: false
