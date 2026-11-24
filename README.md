@@ -1,6 +1,6 @@
 # Skills
 
-15 個 agent skills。取自 [mattpocock/skills](https://github.com/mattpocock/skills)，融入 [shadcn/improve](https://github.com/shadcn/improve) 的計畫紀律：grill 系列四合一，repo 有 GitHub 遠端時優先在原票加入／更新 spec 區塊，無原票才新建 spec issue，ticket 一票一個 issue；無 GitHub 遠端則寫入 `.scratch/`；要求自足、可跑的驗證準則、STOP 條件與 drift check（先確認計畫仍符合程式碼）。
+16 個 agent skills。取自 [mattpocock/skills](https://github.com/mattpocock/skills)，融入 [shadcn/improve](https://github.com/shadcn/improve) 的計畫紀律：grill 系列四合一，repo 有 GitHub 遠端時優先在原票加入／更新 spec 區塊，無原票才新建 spec issue，ticket 一票一個 issue；無 GitHub 遠端則寫入 `.scratch/`；要求自足、可跑的驗證準則、STOP 條件與 drift check（先確認計畫仍符合程式碼）。
 
 每個 skill 附 `SKILL.md`（Agent Skills 標準）與 `agents/openai.yaml`（Codex metadata），Claude Code 與 Codex 裝完即用。
 
@@ -53,6 +53,7 @@ cd skills && ./scripts/link-skills.sh
 | [implement](./skills/implement/SKILL.md) | user | 照 spec/tickets 實作：drift check、`tdd`、跑指令驗收、授權後 commit；交接目標 repo、來源、實作 commit 與驗證結果，供獨立 `review` 及 `to-docs` 接續 |
 | [review](./skills/review/SKILL.md) | user | 在沒寫過這段 code 的 session 三軸審 diff（含未 commit 與 untracked）：Spec、Correctness、Standards 分開報告；作者的設計文件只當待驗證的說法；逐條開檔驗證，外部 review 意見也走同一套 |
 | [to-docs](./skills/to-docs/SKILL.md) | user | 從完成的實作脈絡與 commits 蒸餾術語、決策，寫進實作目標專案的既有文檔；支援 issue 或本地規劃來源，文檔獨立 commit |
+| [deliver](./skills/deliver/SKILL.md) | user | 一個指令串接 grill → to-spec →（視規模）to-tickets → implement → review → to-docs；保留各步驟的確認點，commit 授權開頭問一次；review 在沒寫過 code 的新 session 跑，to-docs 回原 session；中斷後給 spec 位置續跑 |
 | [retro](./skills/retro/SKILL.md) | user | 從 session 的實際摩擦提出 agent 環境改善；機械錯誤優先變成自動檢查，判斷問題才補規範 |
 | [tdd](./skills/tdd/SKILL.md) | model | 紅綠循環；seam（模組介面所在、測試穿過的位置）先議定，只測外部行為 |
 | [diagnosing-bugs](./skills/diagnosing-bugs/SKILL.md) | model | 先建 tight feedback loop（可快速重現的明確紅綠訊號），再查原因 |
