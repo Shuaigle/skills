@@ -111,13 +111,30 @@ class SpecArtifactTests(unittest.TestCase):
         local = b'User supplied spec\r\nExample: <!-- to-spec:begin -->\r\n'
         self.assertEqual(self.inspect(local, WHOLE)['sha256'], hashlib.sha256(local).hexdigest())
 
-    def test_utf8_crlf_and_final_newline_are_not_normalized(self):
-        spec = SPEC.replace(b'Find a message.', '尋找訊息。'.encode()).replace(b'\n', b'\r\n')
-        body = BEGIN.replace(b'\n', b'\r\n') + spec + END.replace(b'\n', b'\r\n')
-        self.assertEqual(self.inspect(body, BLOCK)['sha256'], hashlib.sha256(spec).hexdigest())
-        changed = body.replace(b'\r\n', b'\n')
-        self.assertNotEqual(self.inspect(body, BLOCK)['sha256'], self.inspect(changed, BLOCK)['sha256'])
-        self.assertNotEqual(self.inspect(SPEC, WHOLE)['sha256'], self.inspect(SPEC[:-1], WHOLE)['sha256'])
+    def test_browser_style_issue_edit_keeps_managed_hash_across_line_endings(self):
+        spec = SPEC.replace(b'Find a message.', '尋找訊息。'.encode())
+        before = b'- [ ] human text\n' + BEGIN + spec + END + b'Old note\n'
+        after = before.replace(b'[ ]', b'[x]').replace(b'Old note', b'New note')
+        after = after.replace(b'\n', b'\r\n')
+        metadata = self.inspect(before, BLOCK, 'inbox-search')
+        self.assertEqual(metadata['sha256'], hashlib.sha256(spec).hexdigest())
+        self.assertEqual(metadata, self.inspect(after, BLOCK, 'inbox-search'))
+        self.assertNotEqual(self.inspect(before, WHOLE), self.inspect(after, WHOLE))
+        edited_spec = after.replace('尋找訊息。'.encode(), '儲存訊息。'.encode())
+        self.assertNotEqual(metadata, self.inspect(edited_spec, BLOCK, 'inbox-search'))
+
+    def test_compose_leaves_original_payload_line_endings_intact(self):
+        human = b'Do not rewrite this text\r\n- [ ] task\r\n'
+        spec = SPEC.replace(b'\n', b'\r\n')
+        output, metadata = self.compose(human, spec)
+        self.assertEqual(output, human + b'\n\n' + BEGIN + spec + END)
+        self.assertEqual(metadata['sha256'], hashlib.sha256(SPEC).hexdigest())
+
+    def test_whole_artifact_preserves_crlf_and_final_newline(self):
+        crlf = SPEC.replace(b'\n', b'\r\n')
+        self.assertEqual(self.inspect(crlf, WHOLE)['sha256'], hashlib.sha256(crlf).hexdigest())
+        self.assertNotEqual(self.inspect(crlf, WHOLE), self.inspect(SPEC, WHOLE))
+        self.assertNotEqual(self.inspect(SPEC, WHOLE), self.inspect(SPEC[:-1], WHOLE))
 
     def test_stale_read_stops_before_writing_even_for_unrelated_change(self):
         self.assertIn('changed since', self.compose(b'New human note', expected=b'Old human note', success=False))

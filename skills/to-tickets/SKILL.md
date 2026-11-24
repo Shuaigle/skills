@@ -17,9 +17,9 @@ The spec owns the problem, scope, and decisions. Tickets own execution order and
 
 ### 1. Read the source
 
-Read exactly one spec, located from an issue URL, an issue number in the resolved GitHub repo, a local path, a feature slug or the current conversation. Fetch an issue's full current body and select its managed spec block when present, otherwise its whole body, using artifact storage. Text outside a managed block and comments are context, not silent spec amendments. Missing, inaccessible or ambiguous, stop and name what is needed.
+Read exactly one spec from a supplied issue URL/number or local path, or discover it from the feature or conversation. Stop on a missing, inaccessible or ambiguous source.
 
-This skill is a compiler: spec bytes stay fixed; only marked output tickets are mutable. Resolve the destination and record the source locator, source slice and SHA-256 now. Hash only the selected spec bytes; retain the same slice for the final readback. The same hash after ticket generation is part of this run's completion criterion.
+Resolve the destination and record the source locator, `Source slice` and SHA-256 using [artifact storage](../to-spec/references/ARTIFACT-STORAGE.md#source-identity-and-immutability). Only marked output tickets are mutable. Verify the same source slice and hash again at readback.
 
 ### 2. Ground the breakdown
 
@@ -72,7 +72,7 @@ For repeated runs, reconcile only tickets whose first line is exactly `<!-- gene
 
 Each ticket must stand alone: the executing agent has not seen this conversation. Inline the conventions to follow, name an exemplar file where one helps, and stamp the commit the ticket was written against.
 
-Read back the output, verify its source and blocker links, and require the original spec's selected slice and content hash to match step 1. Unrelated issue prose may change without invalidating a managed-block hash; never rewrite that prose. A mismatch fails the run. Never append a ticket list to the source spec. Return the confirmed issue URLs or local paths; on partial failure, report the completed subset and resume without duplicating it.
+Read back the output, verify its source and blocker links, and require the original spec's selected slice and content hash to match step 1. Never rewrite the source. A mismatch fails the run. Never append a ticket list to the source spec. Return the confirmed issue URLs or local paths; on partial failure, report the completed subset and resume without duplicating it.
 
 <ticket-template>
 

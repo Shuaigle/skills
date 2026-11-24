@@ -54,7 +54,8 @@ def source(body, source_slice=None, feature=None):
         span = block_span(body)
         if span is None:
             raise ValueError("recorded managed block is missing")
-        payload = body[span[0]:span[1]]
+        # An issue editor may normalize the full body, including our unchanged block.
+        payload = body[span[0]:span[1]].replace(b"\r\n", b"\n")
     elif selected == WHOLE:
         payload = body
     else:
@@ -107,7 +108,7 @@ def ticket_target(body, feature, ticket):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     commands = parser.add_subparsers(dest="command", required=True)
-    inspect = commands.add_parser("source", help="report source slice, feature and exact SHA-256")
+    inspect = commands.add_parser("source", help="report source slice, feature and SHA-256")
     inspect.add_argument("--input", type=Path, required=True)
     inspect.add_argument("--slice", choices=(WHOLE, BLOCK))
     inspect.add_argument("--feature")

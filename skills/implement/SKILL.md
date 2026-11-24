@@ -12,7 +12,7 @@ When several tickets exist, work the **frontier**: read each referenced blocker 
 
 ## Rules
 
-1. Read the current source bodies first, including the ticket's linked spec. When implementing a spec issue directly, select its managed block when present; local specs remain whole-file sources. For a generated ticket, resolve `Source spec`, select the recorded `Source slice` under artifact storage, and compare those exact bytes with `Source SHA-256`. A missing slice means legacy `whole-artifact-v1`, never automatic block selection. For `to-spec-block-v1`, require exactly one valid block matching the ticket's feature; exclude surrounding issue prose from the hash and requirements. Older local generated tickets lacking `Source spec` and `Source SHA-256` may use an explicitly supplied or unambiguous adjacent `spec.md`; snapshot its current hash for this run without inventing a historical hash. Ambiguous sources, mismatched hashes, and missing provenance on issue or new-format tickets stop the run for reconciliation. Drift-check the spec/ticket's recorded commit against `HEAD`. If the code it cites has changed underneath it, stop and report — do not improvise around a stale plan.
+1. Read current source bodies and linked specs. Resolve and verify each `Source slice` and its hash under [artifact storage](../to-spec/references/ARTIFACT-STORAGE.md#source-identity-and-immutability); reconcile failures before treating the plan as current. Drift-check the spec/ticket's recorded commit against `HEAD`. If cited code has changed underneath it, stop and report instead of improvising.
 2. Touch only what the spec/ticket puts in scope. No drive-by fixes; note them for a future ticket.
 3. A ticket's STOP condition fires → stop and report.
 
