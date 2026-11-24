@@ -1,6 +1,6 @@
 # Skills
 
-15 個 agent skills。取自 [mattpocock/skills](https://github.com/mattpocock/skills)，融入 [shadcn/improve](https://github.com/shadcn/improve) 的計畫紀律：grill 系列四合一，repo 有 GitHub 遠端時把 spec/ticket 寫成 issues，否則寫入 `.scratch/`；要求自足、可跑的驗證準則、STOP 條件與 drift check（先確認計畫仍符合程式碼）。
+15 個 agent skills。取自 [mattpocock/skills](https://github.com/mattpocock/skills)，融入 [shadcn/improve](https://github.com/shadcn/improve) 的計畫紀律：grill 系列四合一，repo 有 GitHub 遠端時優先在原票加入／更新 spec 區塊，無原票才新建 spec issue，ticket 一票一個 issue；無 GitHub 遠端則寫入 `.scratch/`；要求自足、可跑的驗證準則、STOP 條件與 drift check（先確認計畫仍符合程式碼）。
 
 每個 skill 附 `SKILL.md`（Agent Skills 標準）與 `agents/openai.yaml`（Codex metadata），Claude Code 與 Codex 裝完即用。
 
@@ -48,8 +48,8 @@ cd skills && ./scripts/link-skills.sh
 | [grill](./skills/grill/SKILL.md) | model | 聚焦本次交付、正確性與已知限制的必要決策，優先用選項 UI 一次問一題；`grill docs` 同時維護詞彙與決策記錄（預設 CONTEXT.md 與 docs/adr/） |
 | [prototype-logic](./skills/prototype-logic/SKILL.md) | model | 用可操作的單檔 HTML 驗證一個邏輯或狀態模型問題，支援自由操作、重設與情境演練 |
 | [browser-qa](./skills/browser-qa/SKILL.md) | model | 在隔離瀏覽器驗收本機真實流程，記錄預期、實際結果與最小執行證據 |
-| [to-spec](./skills/to-spec/SKILL.md) | user | 把已確認需求收斂成自足、可驗收的 spec；有 GitHub 遠端就寫成 issue，否則寫入 `.scratch/<feature>/spec.md` |
-| [to-tickets](./skills/to-tickets/SKILL.md) | user | 把 spec 純轉譯成 tracer-bullet tickets（可工作的縱切）；有 GitHub 遠端就一票一個 issue，否則一票一個本地檔案；保留來源 hash、驗收指令、STOP 條件與 blocking 關係 |
+| [to-spec](./skills/to-spec/SKILL.md) | user | 把已確認需求收斂成自足、可驗收的 spec；優先更新同功能原票的 spec 區塊並保留人工內容，無原票才新建 issue；無 GitHub 遠端則寫入 `.scratch/<feature>/spec.md` |
+| [to-tickets](./skills/to-tickets/SKILL.md) | user | 把 spec 純轉譯成 tracer-bullet tickets（可工作的縱切）；有 GitHub 遠端就一票一個 issue，否則一票一個本地檔案；保留來源區段與 hash（spec 區塊外文字不影響）、驗收指令、STOP 條件與 blocking 關係 |
 | [implement](./skills/implement/SKILL.md) | user | 照 spec/tickets 實作：drift check、`tdd`、跑指令驗收、授權後 commit；交接目標 repo、來源、實作 commit 與驗證結果，供獨立 `review` 及 `to-docs` 接續 |
 | [review](./skills/review/SKILL.md) | user | 在沒寫過這段 code 的 session 三軸審 diff（含未 commit 與 untracked）：Spec、Correctness、Standards 分開報告；作者的設計文件只當待驗證的說法；逐條開檔驗證，外部 review 意見也走同一套 |
 | [to-docs](./skills/to-docs/SKILL.md) | user | 從完成的實作脈絡與 commits 蒸餾術語、決策，寫進實作目標專案的既有文檔；支援 issue 或本地規劃來源，文檔獨立 commit |

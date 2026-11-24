@@ -1,5 +1,5 @@
 interface:
   display_name: "To Spec"
-  short_description: "Turn agreed requirements into an issue or local spec"
+  short_description: "Update the feature issue with a spec, or create one"
 policy:
   allow_implicit_invocation: false
